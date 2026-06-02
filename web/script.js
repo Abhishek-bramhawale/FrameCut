@@ -1,6 +1,11 @@
 const fileInput = document.getElementById("file-input");
 const browseBtn = document.getElementById("browse-btn");
 const dropZone = document.getElementById("drop-zone");
+const landingPage = document.getElementById("landing-page");
+const appWorkspace = document.getElementById("app-workspace");
+const getStartedBtn = document.getElementById("get-started-btn");
+const backToLandingBtn = document.getElementById("back-to-landing-btn");
+const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const uploadCard = document.getElementById("upload-card");
 const progressCard = document.getElementById("progress-card");
 const resultsCard = document.getElementById("results-card");
@@ -24,6 +29,30 @@ let currentJobId = null;
 let pollTimer = null;
 let lastRenderedSceneCount = 0;
 let lastLogCount = 0;
+const THEME_KEY = "scene_splitter_theme";
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === "dark") root.classList.add("dark");
+  else root.classList.remove("dark");
+  themeToggleBtn.textContent = theme === "dark" ? "Switch to Light" : "Switch to Dark";
+}
+
+function initializeTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  applyTheme(saved || (prefersDark ? "dark" : "light"));
+}
+
+function showWorkspace() {
+  landingPage.classList.add("hidden");
+  appWorkspace.classList.remove("hidden");
+}
+
+function showLanding() {
+  appWorkspace.classList.add("hidden");
+  landingPage.classList.remove("hidden");
+}
 
 function setProgress(progress, stage) {
   progressBar.style.width = `${progress}%`;
@@ -231,3 +260,15 @@ modal.addEventListener("click", (e) => {
     modal.close();
   }
 });
+
+themeToggleBtn.addEventListener("click", () => {
+  const current = document.documentElement.classList.contains("dark") ? "dark" : "light";
+  const next = current === "dark" ? "light" : "dark";
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+});
+
+getStartedBtn.addEventListener("click", showWorkspace);
+backToLandingBtn.addEventListener("click", showLanding);
+
+initializeTheme();

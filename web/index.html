@@ -1,51 +1,102 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Scene Splitter Clips</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+      };
+    </script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
-    <main class="app">
-      <header class="hero">
-        <h1>Scene Splitter Clips</h1>
-        <p>Upload a video, detect scene boundaries, preview each clip, and download results.</p>
-      </header>
+  <body class="bg-black text-zinc-100">
+    <main class="mx-auto min-h-screen max-w-7xl px-4 py-6 md:px-8">
+      <section id="landing-page" class="landing-shell">
+        <div class="landing-glow"></div>
+        <div class="relative z-10">
+          <header class="mb-8 flex flex-col gap-5 border-b border-zinc-800 pb-6 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p class="inline-flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1 text-xs uppercase tracking-[0.2em] text-zinc-300">
+                <span class="h-2 w-2 rounded-full bg-amber-500"></span>
+                Premium Scene Tool
+              </p>
+              <h1 class="mt-4 text-3xl font-semibold leading-tight md:text-5xl">Scene Splitter Clips</h1>
+              <p class="mt-4 max-w-2xl text-sm text-zinc-300 md:text-base">
+                Detect true shot boundaries and export scene-ready clips at scale with preview, structured logs,
+                and muted/unmuted download packs.
+              </p>
+            </div>
+            <button id="theme-toggle-btn" type="button" class="btn-secondary">Toggle Theme</button>
+          </header>
 
-      <section id="upload-card" class="card">
-        <div id="drop-zone" class="drop-zone" tabindex="0">
-          <input id="file-input" type="file" accept="video/*" hidden />
-          <p class="drop-title">Drag & drop your video here</p>
-          <p class="drop-subtitle">or click to select a file</p>
-          <button id="browse-btn" type="button">Choose Video</button>
+          <div class="grid gap-4 md:grid-cols-3">
+            <article class="landing-feature">
+              <h3>Accurate Shot Detection</h3>
+              <p>Content-aware scene analysis that avoids noisy false splits.</p>
+            </article>
+            <article class="landing-feature">
+              <h3>Live Progressive Export</h3>
+              <p>Scenes appear as soon as they are generated, not at the end.</p>
+            </article>
+            <article class="landing-feature">
+              <h3>Muted + Unmuted Packs</h3>
+              <p>Bulk and per-scene downloads with a single consistent workflow.</p>
+            </article>
+          </div>
+
+          <div class="mt-8 flex flex-wrap items-center gap-3">
+            <button id="get-started-btn" type="button" class="btn-primary">Get Started</button>
+            <span class="text-xs uppercase tracking-widest text-zinc-500">Upload -> Detect -> Preview -> Download</span>
+          </div>
         </div>
       </section>
 
-      <section id="progress-card" class="card hidden">
-        <div class="progress-header">
-          <h2>Processing</h2>
-          <span id="progress-percent">0%</span>
-        </div>
-        <div class="progress-track">
-          <div id="progress-bar" class="progress-bar"></div>
-        </div>
-        <p id="progress-stage" class="progress-stage">Waiting...</p>
-        <div id="log-line" class="log-line">Log: Waiting for upload.</div>
-      </section>
-
-      <section id="results-card" class="card hidden">
-        <div class="results-toolbar">
+      <section id="app-workspace" class="hidden">
+        <header class="mb-6 mt-3 flex flex-col gap-4 border-b border-zinc-800 pb-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2>Detected Scenes</h2>
-            <p id="scene-total" class="scene-total">0 / 0 scenes exported</p>
+            <h2 class="text-2xl font-semibold">Scene Extraction Workspace</h2>
+            <p class="mt-1 text-sm text-zinc-400">Process one video and download precise scene clips.</p>
           </div>
-          <div class="bulk-actions">
-            <button id="download-all-unmuted-btn" type="button">Download All Unmuted</button>
-            <button id="download-all-muted-btn" type="button">Download All Muted</button>
+          <button id="back-to-landing-btn" type="button" class="btn-secondary">Back to Landing</button>
+        </header>
+
+        <section id="upload-card" class="panel">
+          <div id="drop-zone" class="upload-drop" tabindex="0">
+            <input id="file-input" type="file" accept="video/*" hidden />
+            <p class="text-lg font-medium">Drop your video here</p>
+            <p class="mt-1 text-sm text-zinc-400">or click to choose from your device</p>
+            <button id="browse-btn" type="button" class="btn-light mt-4">Choose Video</button>
           </div>
-        </div>
-        <div id="gallery" class="gallery"></div>
+        </section>
+
+        <section id="progress-card" class="panel hidden">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">Processing</h3>
+            <span id="progress-percent" class="text-sm text-zinc-300">0%</span>
+          </div>
+          <div class="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+            <div id="progress-bar" class="h-full w-0 rounded-full bg-amber-500 transition-all"></div>
+          </div>
+          <p id="progress-stage" class="mt-3 text-sm text-zinc-300">Waiting...</p>
+          <p id="log-line" class="mt-2 rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-300">Log: Waiting for upload.</p>
+        </section>
+
+        <section id="results-card" class="panel hidden">
+          <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="text-lg font-semibold">Detected Scenes</h3>
+              <p id="scene-total" class="mt-1 text-sm text-zinc-400">0 / 0 scenes exported</p>
+            </div>
+            <div class="flex gap-2">
+              <button id="download-all-unmuted-btn" type="button" class="btn-unmuted">Download All Unmuted</button>
+              <button id="download-all-muted-btn" type="button" class="btn-muted">Download All Muted</button>
+            </div>
+          </div>
+          <div id="gallery" class="scene-grid"></div>
+        </section>
       </section>
     </main>
 
@@ -57,12 +108,12 @@
         <h3 id="modal-title">Scene Preview</h3>
         <video id="modal-video" controls playsinline></video>
         <div class="modal-actions">
-          <a id="modal-download-unmuted-btn" href="#" download>Download Unmuted</a>
-          <a id="modal-download-muted-btn" href="#" download>Download Muted</a>
+          <a id="modal-download-unmuted-btn" href="#" download class="btn-unmuted">Download Unmuted</a>
+          <a id="modal-download-muted-btn" href="#" download class="btn-muted">Download Muted</a>
         </div>
-      </div>
+      </section>
     </dialog>
 
     <script src="/script.js" defer></script>
   </body>
-  </html>
+</html>
