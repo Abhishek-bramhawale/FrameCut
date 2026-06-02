@@ -7,18 +7,23 @@ const resultsCard = document.getElementById("results-card");
 const progressBar = document.getElementById("progress-bar");
 const progressPercent = document.getElementById("progress-percent");
 const progressStage = document.getElementById("progress-stage");
+const logLine = document.getElementById("log-line");
 const gallery = document.getElementById("gallery");
 const sceneTotal = document.getElementById("scene-total");
-const downloadAllBtn = document.getElementById("download-all-btn");
+const downloadAllUnmutedBtn = document.getElementById("download-all-unmuted-btn");
+const downloadAllMutedBtn = document.getElementById("download-all-muted-btn");
 
 const modal = document.getElementById("preview-modal");
 const modalVideo = document.getElementById("modal-video");
 const modalTitle = document.getElementById("modal-title");
-const modalDownloadBtn = document.getElementById("modal-download-btn");
+const modalDownloadUnmutedBtn = document.getElementById("modal-download-unmuted-btn");
+const modalDownloadMutedBtn = document.getElementById("modal-download-muted-btn");
 const closeModalBtn = document.getElementById("close-modal-btn");
 
 let currentJobId = null;
 let pollTimer = null;
+let lastRenderedSceneCount = 0;
+let lastLogCount = 0;
 
 function setProgress(progress, stage) {
   progressBar.style.width = `${progress}%`;
@@ -40,17 +45,30 @@ async function uploadVideo(file) {
 }
 
 function renderScenes(job) {
-  gallery.innerHTML = "";
-  sceneTotal.textContent = `${job.total_scenes} scenes`;
-  downloadAllBtn.onclick = () => {
-    if (job.download_all_url) {
-      window.location.href = job.download_all_url;
-    }
+  const expected = job.expected_scenes || job.total_scenes || 0;
+  sceneTotal.textContent = `${job.total_scenes} / ${expected} scenes exported`;
+  downloadAllUnmutedBtn.disabled = !job.download_all_unmuted_url;
+  downloadAllMutedBtn.disabled = !job.download_all_muted_url;
+  downloadAllUnmutedBtn.onclick = () => {
+    if (job.download_all_unmuted_url) window.location.href = job.download_all_unmuted_url;
+  };
+  downloadAllMutedBtn.onclick = () => {
+    if (job.download_all_muted_url) window.location.href = job.download_all_muted_url;
   };
 
-  for (const scene of job.scenes) {
+  if (job.total_scenes < lastRenderedSceneCount) {
+    gallery.innerHTML = "";
+    lastRenderedSceneCount = 0;
+  }
+
+  for (let i = lastRenderedSceneCount; i < job.scenes.length; i += 1) {
+    const scene = job.scenes[i];
     const card = document.createElement("article");
     card.className = "scene-card";
+    card.dataset.preview = scene.clip_url;
+    card.dataset.number = String(scene.scene_number);
+    card.dataset.downloadUnmuted = scene.download_unmuted_url;
+    card.dataset.downloadMuted = scene.download_muted_url;
     card.innerHTML = `
       <img src="${scene.thumbnail_url}" alt="Scene ${scene.scene_number}" loading="lazy" />
       <div class="scene-body">
@@ -61,12 +79,27 @@ function renderScenes(job) {
           <span>Duration: ${scene.duration_timestamp}</span>
         </div>
         <div class="scene-actions">
-          <button type="button" data-preview="${scene.clip_url}" data-number="${scene.scene_number}" data-download="${scene.download_url}">Preview</button>
-          <a href="${scene.download_url}" download="${scene.clip_name}">Download</a>
+          <button type="button" class="preview-btn" data-preview="${scene.clip_url}" data-number="${scene.scene_number}" data-download-unmuted="${scene.download_unmuted_url}" data-download-muted="${scene.download_muted_url}">Preview</button>
+          <a href="${scene.download_unmuted_url}" download="${scene.clip_name}" data-stop-card>Unmuted</a>
+          <a href="${scene.download_muted_url}" download="${scene.muted_clip_name}" class="mute-btn" data-stop-card>Muted</a>
         </div>
       </div>
     `;
     gallery.appendChild(card);
+  }
+  lastRenderedSceneCount = job.scenes.length;
+}
+
+function updateLogLine(job) {
+  const logs = Array.isArray(job.logs) ? job.logs : [];
+  if (!logs.length) return;
+
+  if (logs.length !== lastLogCount) {
+    logLine.textContent = `Log: ${logs[logs.length - 1]}`;
+    lastLogCount = logs.length;
+  } else {
+    const expected = job.expected_scenes || 0;
+    logLine.textContent = `Log: ${job.stage} (${job.total_scenes}/${expected || "?"})`;
   }
 }
 
@@ -82,6 +115,9 @@ function startPolling() {
     const job = await res.json();
 
     setProgress(job.progress || 0, job.stage || "Processing...");
+    updateLogLine(job);
+    renderScenes(job);
+    resultsCard.classList.remove("hidden");
 
     if (job.status === "failed") {
       clearInterval(pollTimer);
@@ -93,8 +129,6 @@ function startPolling() {
     if (job.status === "done") {
       clearInterval(pollTimer);
       pollTimer = null;
-      renderScenes(job);
-      resultsCard.classList.remove("hidden");
     }
   }, 1200);
 }
@@ -108,11 +142,16 @@ async function handleFile(file) {
   uploadCard.classList.add("hidden");
   progressCard.classList.remove("hidden");
   resultsCard.classList.add("hidden");
+  gallery.innerHTML = "";
+  lastRenderedSceneCount = 0;
+  lastLogCount = 0;
   setProgress(2, "Uploading video...");
+  logLine.textContent = "Log: Uploading video.";
 
   try {
     currentJobId = await uploadVideo(file);
     setProgress(4, "Video uploaded. Starting scene detection...");
+    logLine.textContent = "Log: Video uploaded. Starting analysis.";
     startPolling();
   } catch (err) {
     alert(err.message || "Upload failed.");
@@ -155,17 +194,27 @@ dropZone.addEventListener("drop", (e) => {
 
 gallery.addEventListener("click", (e) => {
   const target = e.target;
-  if (!(target instanceof HTMLButtonElement)) return;
-  const previewUrl = target.dataset.preview;
-  const sceneNumber = target.dataset.number;
-  const downloadUrl = target.dataset.download;
+  if (!(target instanceof HTMLElement)) return;
+
+  const card = target.closest(".scene-card");
+  if (!card) return;
+
+  if (target.matches("[data-stop-card]")) {
+    return;
+  }
+
+  const previewUrl = card.dataset.preview;
+  const sceneNumber = card.dataset.number;
+  const downloadUnmutedUrl = card.dataset.downloadUnmuted;
+  const downloadMutedUrl = card.dataset.downloadMuted;
   if (!previewUrl) return;
 
   modalTitle.textContent = `Scene ${sceneNumber} Preview`;
   modalVideo.src = previewUrl;
   modalVideo.currentTime = 0;
   modalVideo.play().catch(() => {});
-  modalDownloadBtn.href = downloadUrl || "#";
+  modalDownloadUnmutedBtn.href = downloadUnmutedUrl || "#";
+  modalDownloadMutedBtn.href = downloadMutedUrl || "#";
   modal.showModal();
 });
 

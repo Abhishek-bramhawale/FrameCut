@@ -31,15 +31,19 @@
           <div id="progress-bar" class="progress-bar"></div>
         </div>
         <p id="progress-stage" class="progress-stage">Waiting...</p>
+        <div id="log-line" class="log-line">Log: Waiting for upload.</div>
       </section>
 
       <section id="results-card" class="card hidden">
         <div class="results-toolbar">
           <div>
             <h2>Detected Scenes</h2>
-            <p id="scene-total" class="scene-total">0 scenes</p>
+            <p id="scene-total" class="scene-total">0 / 0 scenes exported</p>
           </div>
-          <button id="download-all-btn" type="button">Download All Scenes</button>
+          <div class="bulk-actions">
+            <button id="download-all-unmuted-btn" type="button">Download All Unmuted</button>
+            <button id="download-all-muted-btn" type="button">Download All Muted</button>
+          </div>
         </div>
         <div id="gallery" class="gallery"></div>
       </section>
@@ -53,7 +57,8 @@
         <h3 id="modal-title">Scene Preview</h3>
         <video id="modal-video" controls playsinline></video>
         <div class="modal-actions">
-          <a id="modal-download-btn" href="#" download>Download Scene</a>
+          <a id="modal-download-unmuted-btn" href="#" download>Download Unmuted</a>
+          <a id="modal-download-muted-btn" href="#" download>Download Muted</a>
         </div>
       </div>
     </dialog>
