@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import threading
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +37,8 @@ class JobState:
     error: str | None = None
     input_video: Path | None = None
     output_dir: Path | None = None
+    expected_scenes: int = 0
+    logs: list[str] = field(default_factory=list)
     scenes: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -46,9 +48,16 @@ class JobState:
             "progress": self.progress,
             "stage": self.stage,
             "error": self.error,
+            "expected_scenes": self.expected_scenes,
             "total_scenes": len(self.scenes),
             "scenes": self.scenes,
-            "download_all_url": f"/api/jobs/{self.id}/download-all" if self.status == "done" else None,
+            "logs": self.logs[-80:],
+            "download_all_unmuted_url": (
+                f"/api/jobs/{self.id}/download-all?muted=0" if self.status in {"processing", "done"} else None
+            ),
+            "download_all_muted_url": (
+                f"/api/jobs/{self.id}/download-all?muted=1" if self.status in {"processing", "done"} else None
+            ),
         }
 
 
@@ -72,6 +81,14 @@ def _set_job(job_id: str, **kwargs: Any) -> None:
         job = jobs[job_id]
         for k, v in kwargs.items():
             setattr(job, k, v)
+
+
+def _append_log(job_id: str, line: str) -> None:
+    with jobs_lock:
+        job = jobs[job_id]
+        job.logs.append(line)
+        if len(job.logs) > 400:
+            job.logs = job.logs[-200:]
 
 
 def _fmt_time(seconds: float) -> str:
@@ -192,8 +209,10 @@ def _extract_scene(
 ) -> dict[str, Any]:
     duration = end_sec - start_sec
     clip_name = f"scene_{idx:04d}.mp4"
+    muted_clip_name = f"scene_{idx:04d}_muted.mp4"
     thumb_name = f"scene_{idx:04d}.jpg"
     clip_path = clips_dir / clip_name
+    muted_clip_path = clips_dir / muted_clip_name
     thumb_path = thumbs_dir / thumb_name
 
     ffmpeg_cmd = [
@@ -262,6 +281,20 @@ def _extract_scene(
         ]
     )
 
+    # Fast muted version generated from exported scene clip.
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(clip_path),
+            "-c:v",
+            "copy",
+            "-an",
+            str(muted_clip_path),
+        ]
+    )
+
     return {
         "scene_number": idx,
         "start_seconds": round(start_sec, 3),
@@ -272,6 +305,7 @@ def _extract_scene(
         "duration_timestamp": _fmt_time(duration),
         "thumbnail_name": thumb_name,
         "clip_name": clip_name,
+        "muted_clip_name": muted_clip_name,
     }
 
 
@@ -282,6 +316,7 @@ def _detect_and_split(job_id: str) -> None:
 
     try:
         _set_job(job_id, status="processing", progress=2, stage="Initializing detector")
+        _append_log(job_id, "Initializing scene detector.")
 
         video = open_video(str(job.input_video))
         scene_manager = SceneManager()
@@ -293,6 +328,7 @@ def _detect_and_split(job_id: str) -> None:
         scene_manager.add_detector(ContentDetector(threshold=27.0, min_scene_len=12))
 
         _set_job(job_id, progress=8, stage="Analyzing video for scene boundaries")
+        _append_log(job_id, "Analyzing visual cuts and transitions.")
         scene_manager.detect_scenes(video=video, show_progress=False)
         scene_list = scene_manager.get_scene_list()
 
@@ -305,6 +341,7 @@ def _detect_and_split(job_id: str) -> None:
             _ = duration  # Keep reference for clarity if needed.
 
         _set_job(job_id, progress=62, stage="Preparing clips")
+        _append_log(job_id, "Scene analysis complete. Preparing clip export.")
 
         output_clips_dir = job.output_dir / "clips"
         thumbs_dir = job.output_dir / "thumbs"
@@ -321,6 +358,8 @@ def _detect_and_split(job_id: str) -> None:
 
         total = len(segments)
         encode_params = _encode_params()
+        _set_job(job_id, expected_scenes=total)
+        _append_log(job_id, f"Detected {total} scenes.")
         cpu_count = os.cpu_count() or 4
         max_workers = max(1, min(6, cpu_count // 2))
         _set_job(
@@ -328,8 +367,9 @@ def _detect_and_split(job_id: str) -> None:
             stage=f"Exporting clips in parallel ({max_workers} workers)",
             progress=64,
         )
+        _append_log(job_id, f"Export started with {max_workers} parallel workers.")
 
-        temp_results: list[dict[str, Any]] = []
+        results_by_scene: dict[int, dict[str, Any]] = {}
         completed = 0
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
@@ -347,42 +387,69 @@ def _detect_and_split(job_id: str) -> None:
             }
             for future in as_completed(futures):
                 completed += 1
-                temp_results.append(future.result())
+                item = future.result()
+                results_by_scene[item["scene_number"]] = item
+                partial_payload = []
+                for scene_num in sorted(results_by_scene):
+                    scene = results_by_scene[scene_num]
+                    clip_name = scene["clip_name"]
+                    muted_clip_name = scene["muted_clip_name"]
+                    thumb_name = scene["thumbnail_name"]
+                    partial_payload.append(
+                        {
+                            "scene_number": scene["scene_number"],
+                            "start_seconds": scene["start_seconds"],
+                            "end_seconds": scene["end_seconds"],
+                            "duration_seconds": scene["duration_seconds"],
+                            "start_timestamp": scene["start_timestamp"],
+                            "end_timestamp": scene["end_timestamp"],
+                            "duration_timestamp": scene["duration_timestamp"],
+                            "thumbnail_url": f"/api/jobs/{job_id}/thumb/{thumb_name}",
+                            "clip_url": f"/api/jobs/{job_id}/clip/{clip_name}",
+                            "muted_clip_url": f"/api/jobs/{job_id}/clip/{muted_clip_name}",
+                            "download_unmuted_url": f"/api/jobs/{job_id}/clip/{clip_name}?download=1",
+                            "download_muted_url": f"/api/jobs/{job_id}/clip/{muted_clip_name}?download=1",
+                            "clip_name": clip_name,
+                            "muted_clip_name": muted_clip_name,
+                        }
+                    )
                 step = 64 + int((completed / max(total, 1)) * 31)
-                _set_job(job_id, progress=min(step, 96), stage=f"Exporting clips ({completed}/{total})")
+                _set_job(
+                    job_id,
+                    progress=min(step, 96),
+                    stage=f"Exporting clips ({completed}/{total})",
+                    scenes=partial_payload,
+                )
+                _append_log(job_id, f"Clip {item['scene_number']} ready ({completed}/{total}).")
 
-        temp_results.sort(key=lambda item: item["scene_number"])
-        scenes_payload: list[dict[str, Any]] = []
-        for item in temp_results:
-            clip_name = item["clip_name"]
-            thumb_name = item["thumbnail_name"]
-            scenes_payload.append(
-                {
-                    "scene_number": item["scene_number"],
-                    "start_seconds": item["start_seconds"],
-                    "end_seconds": item["end_seconds"],
-                    "duration_seconds": item["duration_seconds"],
-                    "start_timestamp": item["start_timestamp"],
-                    "end_timestamp": item["end_timestamp"],
-                    "duration_timestamp": item["duration_timestamp"],
-                    "thumbnail_url": f"/api/jobs/{job_id}/thumb/{thumb_name}",
-                    "clip_url": f"/api/jobs/{job_id}/clip/{clip_name}",
-                    "download_url": f"/api/jobs/{job_id}/clip/{clip_name}?download=1",
-                    "clip_name": clip_name,
-                }
-            )
+        with jobs_lock:
+            scenes_payload = list(jobs[job_id].scenes)
 
         manifest_path = job.output_dir / "manifest.json"
         manifest_path.write_text(json.dumps({"scenes": scenes_payload}, indent=2), encoding="utf-8")
 
-        zip_path = job.output_dir / "all_scenes.zip"
-        if zip_path.exists():
-            zip_path.unlink()
-        shutil.make_archive(str(job.output_dir / "all_scenes"), "zip", root_dir=output_clips_dir)
+        unmuted_zip = job.output_dir / "all_scenes_unmuted.zip"
+        muted_zip = job.output_dir / "all_scenes_muted.zip"
+        if unmuted_zip.exists():
+            unmuted_zip.unlink()
+        if muted_zip.exists():
+            muted_zip.unlink()
+        _append_log(job_id, "Building ZIP archive (unmuted).")
+        with zipfile.ZipFile(unmuted_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for scene in scenes_payload:
+                clip_file = output_clips_dir / scene["clip_name"]
+                zf.write(clip_file, arcname=scene["clip_name"])
+        _append_log(job_id, "Building ZIP archive (muted).")
+        with zipfile.ZipFile(muted_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for scene in scenes_payload:
+                clip_file = output_clips_dir / scene["muted_clip_name"]
+                zf.write(clip_file, arcname=scene["muted_clip_name"])
 
         _set_job(job_id, scenes=scenes_payload, progress=100, status="done", stage="Completed")
+        _append_log(job_id, "Processing complete.")
     except Exception as exc:  # noqa: BLE001
         _set_job(job_id, status="failed", stage="Failed", error=str(exc), progress=100)
+        _append_log(job_id, f"Failed: {exc}")
 
 
 @app.post("/api/upload")
@@ -452,15 +519,16 @@ def get_thumbnail(job_id: str, thumb_name: str) -> FileResponse:
 
 
 @app.get("/api/jobs/{job_id}/download-all")
-def download_all(job_id: str) -> FileResponse:
+def download_all_v2(job_id: str, muted: int = 0) -> FileResponse:
     with jobs_lock:
         job = jobs.get(job_id)
     if not job or not job.output_dir:
         raise HTTPException(status_code=404, detail="Job not found.")
-    zip_path = job.output_dir / "all_scenes.zip"
+    zip_path = job.output_dir / ("all_scenes_muted.zip" if muted else "all_scenes_unmuted.zip")
     if not zip_path.exists():
         raise HTTPException(status_code=404, detail="Archive not ready.")
-    return FileResponse(zip_path, media_type="application/zip", filename=f"{job_id}_scenes.zip")
+    suffix = "muted" if muted else "unmuted"
+    return FileResponse(zip_path, media_type="application/zip", filename=f"{job_id}_scenes_{suffix}.zip")
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="web")
