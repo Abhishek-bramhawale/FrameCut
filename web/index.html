@@ -35,40 +35,72 @@
                 the scenes you need. Perfect for content creators, video editors, researchers, marketers, and
                 anyone working with large video collections.
               </p>
-              <p class="hero-trust">
-                No manual cutting • Supports long videos • Hundreds of scenes detected automatically
-              </p>
+              <div class="hero-cta-row">
+                <button id="hero-get-started-btn" type="button" class="btn-primary">Get Started</button>
+                <span class="hero-cta-note">No manual cutting • Supports long videos • Hundreds of scenes detected automatically</span>
+              </div>
             </div>
             <div class="hero-visual-wrap">
               <div class="hero-visual">
-                <div class="image-placeholder">
-                  <div class="placeholder-top">
-                    <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-                  </div>
-                  <div class="placeholder-bars">
-                    <span></span><span></span><span></span>
-                  </div>
-                  <p>Scene Gallery Preview Placeholder</p>
-                </div>
+                <img class="landing-screenshot" src="/Images/result.png" alt="FrameCut results gallery preview" loading="lazy" />
               </div>
             </div>
           </section>
 
+          <button
+            id="landing-to-hero-btn"
+            type="button"
+            class="landing-to-hero-btn"
+            aria-label="Back to top hero"
+            title="Back to top"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 19V5m0 0l-6 6m6-6 6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+
           <section id="how-it-works" class="content-section reveal">
             <h2>Split Videos in 3 Simple Steps</h2>
-            <div class="grid gap-4 md:grid-cols-3">
-              <article class="landing-feature">
-                <h3><span class="feature-icon icon-step">1</span> Upload Your Video</h3>
-                <p>Drag and drop your video or select a file from your device.</p>
-              </article>
-              <article class="landing-feature">
-                <h3><span class="feature-icon icon-step">2</span> Detect Scene Changes</h3>
-                <p>The system analyzes visual changes and identifies scene boundaries automatically.</p>
-              </article>
-              <article class="landing-feature">
-                <h3><span class="feature-icon icon-step">3</span> Preview & Download</h3>
-                <p>Browse detected scenes, preview clips, and download exactly what you need.</p>
-              </article>
+            <div class="how-timeline">
+              <div class="timeline">
+                <div class="timeline-rail" aria-hidden="true"></div>
+
+                <article class="timeline-step active">
+                  <span class="timeline-node" aria-hidden="true"></span>
+                  <div class="timeline-card">
+                    <div class="timeline-top">
+                      <span class="timeline-kicker">Step 01</span>
+                      <span class="timeline-tag">Upload</span>
+                    </div>
+                    <h3 class="timeline-title">Upload Your Video</h3>
+                    <p class="timeline-desc">Drag and drop a video or select a file from your device.</p>
+                  </div>
+                </article>
+
+                <article class="timeline-step active">
+                  <span class="timeline-node" aria-hidden="true"></span>
+                  <div class="timeline-card">
+                    <div class="timeline-top">
+                      <span class="timeline-kicker">Step 02</span>
+                      <span class="timeline-tag">Detect</span>
+                    </div>
+                    <h3 class="timeline-title">Detect Scene Changes</h3>
+                    <p class="timeline-desc">Analyze visual cuts and transitions to find real shot boundaries.</p>
+                  </div>
+                </article>
+
+                <article class="timeline-step active">
+                  <span class="timeline-node" aria-hidden="true"></span>
+                  <div class="timeline-card">
+                    <div class="timeline-top">
+                      <span class="timeline-kicker">Step 03</span>
+                      <span class="timeline-tag">Export</span>
+                    </div>
+                    <h3 class="timeline-title">Preview & Download</h3>
+                    <p class="timeline-desc">Preview clips instantly and download muted or unmuted scenes.</p>
+                  </div>
+                </article>
+              </div>
             </div>
           </section>
 
@@ -202,10 +234,7 @@
                 </div>
               </article>
               <div class="timeline-preview">
-                <div class="image-placeholder use-case-placeholder">
-                  <div class="placeholder-bars"><span></span><span></span></div>
-                  <p>Use Case Preview Placeholder</p>
-                </div>
+                <img class="landing-screenshot landing-screenshot--tall" src="/Images/preview.png" alt="FrameCut scene preview modal" loading="lazy" />
               </div>
             </div>
           </section>
@@ -252,13 +281,18 @@
       </section>
 
       <section id="app-workspace" class="hidden">
-        <div class="workspace-inner">
+        <div class="workspace-inner workspace-full">
         <header class="mb-6 mt-3 flex flex-col gap-4 border-b border-zinc-800 pb-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 class="text-2xl font-semibold">Scene Extraction Workspace</h2>
-            <p class="mt-1 text-sm text-zinc-400">Process one video and download precise scene clips.</p>
+          <div class="flex items-center gap-3">
+            <button id="back-to-landing-btn" type="button" class="btn-secondary icon-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div>
+              <h2 class="text-2xl font-semibold">FrameCut</h2>
+              <p class="mt-1 text-sm text-zinc-400">Process one video and download precise scene clips.</p>
+            </div>
           </div>
-          <button id="back-to-landing-btn" type="button" class="btn-secondary">Back to Landing</button>
+          <button id="workspace-theme-toggle-btn" type="button" class="icon-theme-btn" aria-label="Toggle theme"></button>
         </header>
 
         <section id="upload-card" class="panel">
@@ -266,7 +300,10 @@
             <input id="file-input" type="file" accept="video/*" hidden />
             <p class="text-lg font-medium">Drop your video here</p>
             <p class="mt-1 text-sm text-zinc-400">or click to choose from your device</p>
-            <button id="browse-btn" type="button" class="btn-light mt-4">Choose Video</button>
+            <button id="browse-btn" type="button" class="btn-light mt-4 icon-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 16V4m0 0l-4 4m4-4 4 4M4 20h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Choose Video
+            </button>
           </div>
         </section>
 
@@ -289,8 +326,14 @@
               <p id="scene-total" class="mt-1 text-sm text-zinc-400">0 / 0 scenes exported</p>
             </div>
             <div class="flex gap-2">
-              <button id="download-all-unmuted-btn" type="button" class="btn-unmuted">Download All Unmuted</button>
-              <button id="download-all-muted-btn" type="button" class="btn-muted">Download All Muted</button>
+              <button id="download-all-unmuted-btn" type="button" class="btn-unmuted icon-btn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v10m0 0l4-4m-4 4-4-4M4 20h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Download All Unmuted
+              </button>
+              <button id="download-all-muted-btn" type="button" class="btn-muted icon-btn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v10m0 0l4-4m-4 4-4-4M4 20h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Download All Muted
+              </button>
             </div>
           </div>
           <div id="gallery" class="scene-grid"></div>

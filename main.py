@@ -23,8 +23,9 @@ DATA_DIR = BASE_DIR / "data"
 UPLOADS_DIR = DATA_DIR / "uploads"
 JOBS_DIR = DATA_DIR / "jobs"
 STATIC_DIR = BASE_DIR / "web"
+IMAGES_DIR = BASE_DIR / "Images"
 
-for p in (UPLOADS_DIR, JOBS_DIR, STATIC_DIR):
+for p in (UPLOADS_DIR, JOBS_DIR, STATIC_DIR, IMAGES_DIR):
     p.mkdir(parents=True, exist_ok=True)
 
 
@@ -531,4 +532,5 @@ def download_all_v2(job_id: str, muted: int = 0) -> FileResponse:
     return FileResponse(zip_path, media_type="application/zip", filename=f"{job_id}_scenes_{suffix}.zip")
 
 
+app.mount("/Images", StaticFiles(directory=IMAGES_DIR), name="images")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="web")

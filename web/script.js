@@ -6,6 +6,8 @@ const appWorkspace = document.getElementById("app-workspace");
 const finalCtaBtn = document.getElementById("final-cta-btn");
 const backToLandingBtn = document.getElementById("back-to-landing-btn");
 const themeToggleBtn = document.getElementById("theme-toggle-btn");
+const workspaceThemeToggleBtn = document.getElementById("workspace-theme-toggle-btn");
+const heroGetStartedBtn = document.getElementById("hero-get-started-btn");
 const personaDetail = document.getElementById("persona-detail");
 const personaChips = Array.from(document.querySelectorAll(".persona-chip"));
 const faqAccordion = document.getElementById("faq-accordion");
@@ -28,11 +30,79 @@ const modalDownloadUnmutedBtn = document.getElementById("modal-download-unmuted-
 const modalDownloadMutedBtn = document.getElementById("modal-download-muted-btn");
 const closeModalBtn = document.getElementById("close-modal-btn");
 
+const landingToHeroBtn = document.getElementById("landing-to-hero-btn");
+const heroBlock = landingPage?.querySelector(".hero-block");
+
 let currentJobId = null;
 let pollTimer = null;
 let lastRenderedSceneCount = 0;
 let lastLogCount = 0;
+let syntheticLogIndex = 0;
+let nextSyntheticLogAt = 0;
 const THEME_KEY = "scene_splitter_theme";
+const VIEW_KEY = "scene_splitter_view";
+const SYNTHETIC_PROCESSING_LOGS = [
+  "Reading video metadata and validating format.",
+  "Building frame analysis plan for boundary detection.",
+  "Scanning visual transitions across frames.",
+  "Comparing edge and color shifts between shots.",
+  "Filtering out camera motion false positives.",
+  "Calibrating scene threshold confidence.",
+  "Collecting candidate shot boundaries.",
+  "Refining start/end cut positions.",
+  "Preparing clip export queue.",
+  "Generating preview assets for detected scenes.",
+  "Optimizing export batches for reliability.",
+  "Finalizing scene manifest for gallery.",
+  "Packaging scene outputs for download.",
+  "Verifying clip durations and timestamps.",
+  "Preparing final response for workspace.",
+  "Indexing frame sequence for temporal analysis.",
+  "Sampling keyframes to estimate shot density.",
+  "Measuring luminance variance between adjacent frames.",
+  "Detecting hard cuts versus gradual transitions.",
+  "Applying motion compensation to stabilize comparisons.",
+  "Grouping similar frames into shot candidates.",
+  "Scoring transition strength across the timeline.",
+  "Removing duplicate boundaries from overlapping detections.",
+  "Normalizing frame rate for consistent analysis.",
+  "Extracting color histograms for scene comparison.",
+  "Tracking object movement to isolate camera pans.",
+  "Evaluating fade and dissolve patterns.",
+  "Checking audio-visual sync markers where available.",
+  "Building a shot boundary confidence map.",
+  "Merging micro-cuts below minimum scene length.",
+  "Splitting over-merged segments at weak boundaries.",
+  "Validating cut points against source timestamps.",
+  "Running secondary pass on ambiguous regions.",
+  "Comparing adaptive and content detector outputs.",
+  "Weighting high-confidence transitions first.",
+  "Smoothing boundary jitter near scene edges.",
+  "Mapping detected scenes to export indices.",
+  "Allocating encoder workers for parallel export.",
+  "Writing scene metadata to job manifest.",
+  "Rendering thumbnail frames at scene midpoints.",
+  "Encoding unmuted clips with source audio.",
+  "Encoding muted variants for each scene.",
+  "Checking output file integrity after encode.",
+  "Updating progress counters for live gallery.",
+  "Compressing batch outputs for ZIP archives.",
+  "Sorting scenes by timeline order.",
+  "Attaching download URLs to scene records.",
+  "Refreshing workspace state with latest exports.",
+  "Estimating remaining export time from queue depth.",
+  "Balancing CPU and GPU encoder load.",
+  "Retrying failed encodes with fallback settings.",
+  "Cleaning temporary frames from working directory.",
+  "Synchronizing scene list with backend job state.",
+  "Running final quality checks on clip boundaries.",
+  "Publishing completed scenes to the gallery view.",
+];
+
+function nextSyntheticDelayMs() {
+  // Random cadence between 5s and 13s.
+  return Math.floor(Math.random() * 8001) + 5000;
+}
 
 // Always start at top on refresh/open.
 if ("scrollRestoration" in history) {
@@ -43,9 +113,15 @@ function applyTheme(theme) {
   const root = document.documentElement;
   if (theme === "dark") root.classList.add("dark");
   else root.classList.remove("dark");
-  themeToggleBtn.innerHTML = theme === "dark"
-    ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 1 0 9.79 9.79Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-    : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+
+  const iconDark =
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 1 0 9.79 9.79Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const iconLight =
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+
+  const icon = theme === "dark" ? iconDark : iconLight;
+  if (themeToggleBtn) themeToggleBtn.innerHTML = icon;
+  if (workspaceThemeToggleBtn) workspaceThemeToggleBtn.innerHTML = icon;
 }
 
 function initializeTheme() {
@@ -54,7 +130,17 @@ function initializeTheme() {
   applyTheme(saved || (prefersDark ? "dark" : "light"));
 }
 
+function toggleTheme() {
+  const current = document.documentElement.classList.contains("dark") ? "dark" : "light";
+  const next = current === "dark" ? "light" : "dark";
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+}
+
 function showWorkspace() {
+  try {
+    sessionStorage.setItem(VIEW_KEY, "workspace");
+  } catch {}
   landingPage.style.transition = "opacity 220ms ease";
   landingPage.style.opacity = "0";
   setTimeout(() => {
@@ -69,6 +155,9 @@ function showWorkspace() {
 }
 
 function showLanding() {
+  try {
+    sessionStorage.setItem(VIEW_KEY, "landing");
+  } catch {}
   appWorkspace.style.transition = "opacity 180ms ease";
   appWorkspace.style.opacity = "0";
   setTimeout(() => {
@@ -81,6 +170,54 @@ function showLanding() {
     });
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, 180);
+}
+
+function restoreViewOnLoad() {
+  let savedView = "landing";
+  try {
+    savedView = sessionStorage.getItem(VIEW_KEY) || "landing";
+  } catch {}
+
+  if (savedView === "workspace") {
+    landingPage.classList.add("hidden");
+    appWorkspace.classList.remove("hidden");
+    landingPage.style.opacity = "0";
+    appWorkspace.style.opacity = "1";
+    return;
+  }
+
+  appWorkspace.classList.add("hidden");
+  landingPage.classList.remove("hidden");
+  landingPage.style.opacity = "1";
+}
+
+function initializeLandingToHero() {
+  if (!landingToHeroBtn || !heroBlock) return;
+
+  const setVisible = (v) => {
+    landingToHeroBtn.style.display = v ? "flex" : "none";
+  };
+
+  // Only show button when landing page is visible and user scrolls past hero.
+  const onScroll = () => {
+    if (!landingPage || landingPage.classList.contains("hidden")) {
+      setVisible(false);
+      return;
+    }
+    const heroBottom = heroBlock.getBoundingClientRect().bottom;
+    // If hero is mostly above the viewport, show the button.
+    setVisible(heroBottom < window.innerHeight * 0.55);
+  };
+
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  landingToHeroBtn.addEventListener("click", () => {
+    heroBlock.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
+  });
 }
 
 function getLandingSections() {
@@ -246,6 +383,15 @@ function setProgress(progress, stage) {
   progressStage.textContent = stage || "Processing...";
 }
 
+function formatDurationHuman(durationSeconds) {
+  const total = Math.max(0, Math.round(Number(durationSeconds) || 0));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  if (mins <= 0) return `${secs} secs`;
+  if (secs <= 0) return `${mins} min`;
+  return `${mins} min ${secs} secs`;
+}
+
 async function uploadVideo(file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -278,6 +424,7 @@ function renderScenes(job) {
 
   for (let i = lastRenderedSceneCount; i < job.scenes.length; i += 1) {
     const scene = job.scenes[i];
+    const durationHuman = formatDurationHuman(scene.duration_seconds);
     const card = document.createElement("article");
     card.className = "scene-card";
     card.dataset.preview = scene.clip_url;
@@ -291,12 +438,21 @@ function renderScenes(job) {
         <div class="scene-meta">
           <span>Start: ${scene.start_timestamp}</span>
           <span>End: ${scene.end_timestamp}</span>
-          <span>Duration: ${scene.duration_timestamp}</span>
+          <span>Duration: ${durationHuman}</span>
         </div>
         <div class="scene-actions">
-          <button type="button" class="preview-btn" data-preview="${scene.clip_url}" data-number="${scene.scene_number}" data-download-unmuted="${scene.download_unmuted_url}" data-download-muted="${scene.download_muted_url}">Preview</button>
-          <a href="${scene.download_unmuted_url}" download="${scene.clip_name}" data-stop-card>Unmuted</a>
-          <a href="${scene.download_muted_url}" download="${scene.muted_clip_name}" class="mute-btn" data-stop-card>Muted</a>
+          <button type="button" class="preview-btn icon-btn" data-preview="${scene.clip_url}" data-number="${scene.scene_number}" data-download-unmuted="${scene.download_unmuted_url}" data-download-muted="${scene.download_muted_url}">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" stroke="currentColor" stroke-width="1.7"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.7"/></svg>
+            Preview
+          </button>
+          <a href="${scene.download_unmuted_url}" download="${scene.clip_name}" class="icon-btn" data-stop-card>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v10m0 0l4-4m-4 4-4-4M4 20h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Unmuted
+          </a>
+          <a href="${scene.download_muted_url}" download="${scene.muted_clip_name}" class="mute-btn icon-btn" data-stop-card>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4V9Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 9l4 6M21 9l-4 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            Muted
+          </a>
         </div>
       </div>
     `;
@@ -308,13 +464,24 @@ function renderScenes(job) {
 function updateLogLine(job) {
   const logs = Array.isArray(job.logs) ? job.logs : [];
   if (!logs.length) return;
+  const now = Date.now();
 
   if (logs.length !== lastLogCount) {
     logLine.textContent = `Log: ${logs[logs.length - 1]}`;
     lastLogCount = logs.length;
+    nextSyntheticLogAt = now + nextSyntheticDelayMs();
   } else {
-    const expected = job.expected_scenes || 0;
-    logLine.textContent = `Log: ${job.stage} (${job.total_scenes}/${expected || "?"})`;
+    if (job.status === "processing" && (job.progress || 0) <= 65) {
+      if (!nextSyntheticLogAt || now >= nextSyntheticLogAt) {
+        const line = SYNTHETIC_PROCESSING_LOGS[syntheticLogIndex % SYNTHETIC_PROCESSING_LOGS.length];
+        syntheticLogIndex += 1;
+        logLine.textContent = `Log: ${line}`;
+        nextSyntheticLogAt = now + nextSyntheticDelayMs();
+      }
+    } else {
+      const expected = job.expected_scenes || 0;
+      logLine.textContent = `Log: ${job.stage} (${job.total_scenes}/${expected || "?"})`;
+    }
   }
 }
 
@@ -335,6 +502,7 @@ function startPolling() {
     resultsCard.classList.remove("hidden");
 
     if (job.status === "failed") {
+      logLine.textContent = `Log: Error - ${job.error || "Unknown error"}`;
       clearInterval(pollTimer);
       pollTimer = null;
       alert(`Processing failed: ${job.error || "Unknown error"}`);
@@ -360,6 +528,8 @@ async function handleFile(file) {
   gallery.innerHTML = "";
   lastRenderedSceneCount = 0;
   lastLogCount = 0;
+  syntheticLogIndex = 0;
+  nextSyntheticLogAt = Date.now() + nextSyntheticDelayMs();
   setProgress(2, "Uploading video...");
   logLine.textContent = "Log: Uploading video.";
 
@@ -375,7 +545,11 @@ async function handleFile(file) {
   }
 }
 
-browseBtn.addEventListener("click", () => fileInput.click());
+browseBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  fileInput.click();
+});
 dropZone.addEventListener("click", () => fileInput.click());
 dropZone.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === " ") {
@@ -430,40 +604,57 @@ gallery.addEventListener("click", (e) => {
   modalVideo.play().catch(() => {});
   modalDownloadUnmutedBtn.href = downloadUnmutedUrl || "#";
   modalDownloadMutedBtn.href = downloadMutedUrl || "#";
-  modal.showModal();
+  openPreviewModal();
 });
 
-closeModalBtn.addEventListener("click", () => {
+function lockPageScroll() {
+  document.documentElement.classList.add("modal-open");
+  document.body.classList.add("modal-open");
+}
+
+function unlockPageScroll() {
+  document.documentElement.classList.remove("modal-open");
+  document.body.classList.remove("modal-open");
+}
+
+function openPreviewModal() {
+  lockPageScroll();
+  modal.showModal();
+}
+
+function closePreviewModal() {
   modalVideo.pause();
   modalVideo.removeAttribute("src");
   modal.close();
-});
+}
+
+closeModalBtn.addEventListener("click", closePreviewModal);
 
 modal.addEventListener("click", (e) => {
-  if (e.target === modal) {
-    modalVideo.pause();
-    modalVideo.removeAttribute("src");
-    modal.close();
-  }
+  if (e.target === modal) closePreviewModal();
 });
 
-themeToggleBtn.addEventListener("click", () => {
-  const current = document.documentElement.classList.contains("dark") ? "dark" : "light";
-  const next = current === "dark" ? "light" : "dark";
-  localStorage.setItem(THEME_KEY, next);
-  applyTheme(next);
-});
+modal.addEventListener("close", unlockPageScroll);
+
+themeToggleBtn.addEventListener("click", toggleTheme);
+if (workspaceThemeToggleBtn) workspaceThemeToggleBtn.addEventListener("click", toggleTheme);
 
 finalCtaBtn.addEventListener("click", showWorkspace);
-backToLandingBtn.addEventListener("click", showLanding);
+if (backToLandingBtn) backToLandingBtn.addEventListener("click", showLanding);
 personaChips.forEach((chip) => {
   chip.addEventListener("click", () => setPersona(chip.dataset.persona));
 });
+if (heroGetStartedBtn) heroGetStartedBtn.addEventListener("click", showWorkspace);
 
 initializeTheme();
+restoreViewOnLoad();
 enableLandingWheelPaging();
 initializeFaqAccordion();
+initializeHowItWorksStepper();
+initializeLandingToHero();
 
 window.addEventListener("load", () => {
-  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  if (!landingPage.classList.contains("hidden")) {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }
 });

@@ -1,6 +1,26 @@
-# Scene Splitter Clips
+# FrameCut
 
 A dedicated web app that detects shot/scene boundaries from an uploaded video and exports each scene as its own clip.
+
+## Screenshots
+
+### Upload
+
+Drag and drop a video or choose a file from your device.
+
+![Upload workspace](Images/upload.png)
+
+### Results
+
+Browse detected scenes with thumbnails, timestamps, and bulk download options.
+
+![Detected scenes gallery](Images/result.png)
+
+### Preview
+
+Open any scene in a full preview player with per-scene muted and unmuted downloads.
+
+![Scene preview modal](Images/preview.png)
 
 ## Features
 
