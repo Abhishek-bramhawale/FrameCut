@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scene Splitter Clips</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <h1>Scene Splitter Clips</h1>
+        <p>Upload a video, detect scene boundaries, preview each clip, and download results.</p>
+      </header>
+
+      <section id="upload-card" class="card">
+        <div id="drop-zone" class="drop-zone" tabindex="0">
+          <input id="file-input" type="file" accept="video/*" hidden />
+          <p class="drop-title">Drag & drop your video here</p>
+          <p class="drop-subtitle">or click to select a file</p>
+          <button id="browse-btn" type="button">Choose Video</button>
+        </div>
+      </section>
+
+      <section id="progress-card" class="card hidden">
+        <div class="progress-header">
+          <h2>Processing</h2>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress-track">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+        <p id="progress-stage" class="progress-stage">Waiting...</p>
+      </section>
+
+      <section id="results-card" class="card hidden">
+        <div class="results-toolbar">
+          <div>
+            <h2>Detected Scenes</h2>
+            <p id="scene-total" class="scene-total">0 scenes</p>
+          </div>
+          <button id="download-all-btn" type="button">Download All Scenes</button>
+        </div>
+        <div id="gallery" class="gallery"></div>
+      </section>
+    </main>
+
+    <dialog id="preview-modal" class="preview-modal">
+      <div class="modal-inner">
+        <button id="close-modal-btn" class="close-modal-btn" type="button" aria-label="Close">
+          ✕
+        </button>
+        <h3 id="modal-title">Scene Preview</h3>
+        <video id="modal-video" controls playsinline></video>
+        <div class="modal-actions">
+          <a id="modal-download-btn" href="#" download>Download Scene</a>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="/script.js" defer></script>
+  </body>
+  </html>
