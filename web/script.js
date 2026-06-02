@@ -3,9 +3,12 @@ const browseBtn = document.getElementById("browse-btn");
 const dropZone = document.getElementById("drop-zone");
 const landingPage = document.getElementById("landing-page");
 const appWorkspace = document.getElementById("app-workspace");
-const getStartedBtn = document.getElementById("get-started-btn");
+const finalCtaBtn = document.getElementById("final-cta-btn");
 const backToLandingBtn = document.getElementById("back-to-landing-btn");
 const themeToggleBtn = document.getElementById("theme-toggle-btn");
+const personaDetail = document.getElementById("persona-detail");
+const personaChips = Array.from(document.querySelectorAll(".persona-chip"));
+const faqAccordion = document.getElementById("faq-accordion");
 const uploadCard = document.getElementById("upload-card");
 const progressCard = document.getElementById("progress-card");
 const resultsCard = document.getElementById("results-card");
@@ -31,11 +34,18 @@ let lastRenderedSceneCount = 0;
 let lastLogCount = 0;
 const THEME_KEY = "scene_splitter_theme";
 
+// Always start at top on refresh/open.
+if ("scrollRestoration" in history) {
+  history.scrollRestoration = "manual";
+}
+
 function applyTheme(theme) {
   const root = document.documentElement;
   if (theme === "dark") root.classList.add("dark");
   else root.classList.remove("dark");
-  themeToggleBtn.textContent = theme === "dark" ? "Switch to Light" : "Switch to Dark";
+  themeToggleBtn.innerHTML = theme === "dark"
+    ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 1 0 9.79 9.79Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
 }
 
 function initializeTheme() {
@@ -45,13 +55,189 @@ function initializeTheme() {
 }
 
 function showWorkspace() {
-  landingPage.classList.add("hidden");
-  appWorkspace.classList.remove("hidden");
+  landingPage.style.transition = "opacity 220ms ease";
+  landingPage.style.opacity = "0";
+  setTimeout(() => {
+    landingPage.classList.add("hidden");
+    appWorkspace.classList.remove("hidden");
+    appWorkspace.style.opacity = "0";
+    appWorkspace.style.transition = "opacity 220ms ease";
+    requestAnimationFrame(() => {
+      appWorkspace.style.opacity = "1";
+    });
+  }, 220);
 }
 
 function showLanding() {
-  appWorkspace.classList.add("hidden");
-  landingPage.classList.remove("hidden");
+  appWorkspace.style.transition = "opacity 180ms ease";
+  appWorkspace.style.opacity = "0";
+  setTimeout(() => {
+    appWorkspace.classList.add("hidden");
+    landingPage.classList.remove("hidden");
+    landingPage.style.opacity = "0";
+    landingPage.style.transition = "opacity 180ms ease";
+    requestAnimationFrame(() => {
+      landingPage.style.opacity = "1";
+    });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, 180);
+}
+
+function getLandingSections() {
+  if (!landingPage) return [];
+  const hero = landingPage.querySelector(".hero-block");
+  const sections = Array.from(landingPage.querySelectorAll(".content-section"));
+  return [hero, ...sections].filter(Boolean);
+}
+
+function currentSectionIndex(sections) {
+  const centerY = window.innerHeight / 2;
+  let bestIdx = 0;
+  let bestDist = Infinity;
+  sections.forEach((el, idx) => {
+    const r = el.getBoundingClientRect();
+    const elCenter = r.top + r.height / 2;
+    const dist = Math.abs(elCenter - centerY);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = idx;
+    }
+  });
+  return bestIdx;
+}
+
+let landingWheelLock = false;
+function enableLandingWheelPaging() {
+  const sections = getLandingSections();
+  if (!sections.length) return;
+
+  // Avoid hijacking on touch devices / small screens.
+  if (window.matchMedia("(pointer: coarse)").matches) return;
+
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      // Only when landing is visible.
+      if (!landingPage || landingPage.classList.contains("hidden")) return;
+      if (landingWheelLock) {
+        e.preventDefault();
+        return;
+      }
+
+      // If user is interacting with expandable content (FAQ), don't hijack.
+      const inDetails = e.target instanceof Element ? e.target.closest("details") : null;
+      if (inDetails) return;
+
+      const dy = e.deltaY;
+      if (Math.abs(dy) < 12) return;
+
+      const idx = currentSectionIndex(sections);
+      const nextIdx = dy > 0 ? Math.min(sections.length - 1, idx + 1) : Math.max(0, idx - 1);
+      if (nextIdx === idx) return;
+
+      e.preventDefault();
+      landingWheelLock = true;
+
+      sections[nextIdx].scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "center",
+      });
+
+      window.setTimeout(() => {
+        landingWheelLock = false;
+      }, 750);
+    },
+    { passive: false }
+  );
+}
+
+const PERSONA_CONTENT = {
+  editors: {
+    title: "Video Editors",
+    description: "Quickly isolate usable shots from large footage collections and reduce manual timeline work.",
+  },
+  creators: {
+    title: "Content Creators",
+    description: "Extract B-roll, transitions, and highlights for shorts, reels, and upcoming projects.",
+  },
+  youtube: {
+    title: "YouTubers",
+    description: "Organize footage and find reusable segments faster while building long-form channels.",
+  },
+  research: {
+    title: "Researchers",
+    description: "Analyze videos scene by scene and inspect transitions without creating cuts manually.",
+  },
+  marketing: {
+    title: "Marketing Teams",
+    description: "Repurpose campaign videos into smaller reusable assets for multiple channels.",
+  },
+  archives: {
+    title: "Media Archives",
+    description: "Break large video files into manageable scene collections for retrieval and tagging.",
+  },
+};
+
+function setPersona(key) {
+  const content = PERSONA_CONTENT[key];
+  if (!content || !personaDetail) return;
+  personaDetail.innerHTML = `<h3>${content.title}</h3><p>${content.description}</p>`;
+  personaChips.forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.persona === key);
+  });
+}
+
+function initializeFaqAccordion() {
+  if (!faqAccordion) return;
+  const rows = Array.from(faqAccordion.querySelectorAll(".faq-row"));
+
+  function closeRow(row) {
+    row.dataset.open = "false";
+    const btn = row.querySelector(".faq-q");
+    const panel = row.querySelector(".faq-a");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    if (panel) {
+      panel.setAttribute("aria-hidden", "true");
+      panel.style.maxHeight = "0px";
+    }
+  }
+
+  function openRow(row) {
+    rows.forEach((r) => {
+      if (r !== row) closeRow(r);
+    });
+    row.dataset.open = "true";
+    const btn = row.querySelector(".faq-q");
+    const panel = row.querySelector(".faq-a");
+    const inner = row.querySelector(".faq-a-inner");
+    if (btn) btn.setAttribute("aria-expanded", "true");
+    if (panel && inner) {
+      panel.setAttribute("aria-hidden", "false");
+      panel.style.maxHeight = `${inner.scrollHeight + 18}px`;
+    }
+  }
+
+  rows.forEach((row) => {
+    closeRow(row);
+    const btn = row.querySelector(".faq-q");
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      const isOpen = row.dataset.open === "true";
+      if (isOpen) closeRow(row);
+      else openRow(row);
+    });
+  });
+
+  // Open the first one by default for a nicer feel.
+  if (rows[0]) openRow(rows[0]);
+
+  window.addEventListener("resize", () => {
+    const open = rows.find((r) => r.dataset.open === "true");
+    if (!open) return;
+    const panel = open.querySelector(".faq-a");
+    const inner = open.querySelector(".faq-a-inner");
+    if (panel && inner) panel.style.maxHeight = `${inner.scrollHeight + 18}px`;
+  });
 }
 
 function setProgress(progress, stage) {
@@ -268,7 +454,16 @@ themeToggleBtn.addEventListener("click", () => {
   applyTheme(next);
 });
 
-getStartedBtn.addEventListener("click", showWorkspace);
+finalCtaBtn.addEventListener("click", showWorkspace);
 backToLandingBtn.addEventListener("click", showLanding);
+personaChips.forEach((chip) => {
+  chip.addEventListener("click", () => setPersona(chip.dataset.persona));
+});
 
 initializeTheme();
+enableLandingWheelPaging();
+initializeFaqAccordion();
+
+window.addEventListener("load", () => {
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+});

@@ -13,48 +13,246 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="bg-black text-zinc-100">
-    <main class="mx-auto min-h-screen max-w-7xl px-4 py-6 md:px-8">
+    <main class="min-h-screen w-full">
       <section id="landing-page" class="landing-shell">
         <div class="landing-glow"></div>
-        <div class="relative z-10">
-          <header class="mb-8 flex flex-col gap-5 border-b border-zinc-800 pb-6 md:flex-row md:items-start md:justify-between">
-            <div>
-              <p class="inline-flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1 text-xs uppercase tracking-[0.2em] text-zinc-300">
-                <span class="h-2 w-2 rounded-full bg-amber-500"></span>
-                Premium Scene Tool
-              </p>
-              <h1 class="mt-4 text-3xl font-semibold leading-tight md:text-5xl">Scene Splitter Clips</h1>
-              <p class="mt-4 max-w-2xl text-sm text-zinc-300 md:text-base">
-                Detect true shot boundaries and export scene-ready clips at scale with preview, structured logs,
-                and muted/unmuted download packs.
-              </p>
-            </div>
-            <button id="theme-toggle-btn" type="button" class="btn-secondary">Toggle Theme</button>
+        <div class="relative z-10 landing-inner">
+          <header class="topbar reveal">
+            <h1 class="brand">FrameCut</h1>
+            <button id="theme-toggle-btn" type="button" class="icon-theme-btn" aria-label="Toggle theme"></button>
           </header>
 
-          <div class="grid gap-4 md:grid-cols-3">
-            <article class="landing-feature">
-              <h3>Accurate Shot Detection</h3>
-              <p>Content-aware scene analysis that avoids noisy false splits.</p>
-            </article>
-            <article class="landing-feature">
-              <h3>Live Progressive Export</h3>
-              <p>Scenes appear as soon as they are generated, not at the end.</p>
-            </article>
-            <article class="landing-feature">
-              <h3>Muted + Unmuted Packs</h3>
-              <p>Bulk and per-scene downloads with a single consistent workflow.</p>
-            </article>
-          </div>
+          <section class="hero-block reveal">
+            <div class="hero-copy">
+              <p class="hero-badge">
+                AUTOMATIC SCENE DETECTION · FAST PROCESSING · NO EDITING REQUIRED
+              </p>
+              <h1 class="hero-title">
+                Turn Any Video Into Individual Scene Clips in Seconds
+              </h1>
+              <p class="hero-subtitle">
+                Upload a video, automatically detect scene boundaries, preview every clip, and download exactly
+                the scenes you need. Perfect for content creators, video editors, researchers, marketers, and
+                anyone working with large video collections.
+              </p>
+              <p class="hero-trust">
+                No manual cutting • Supports long videos • Hundreds of scenes detected automatically
+              </p>
+            </div>
+            <div class="hero-visual-wrap">
+              <div class="hero-visual">
+                <div class="image-placeholder">
+                  <div class="placeholder-top">
+                    <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                  </div>
+                  <div class="placeholder-bars">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <p>Scene Gallery Preview Placeholder</p>
+                </div>
+              </div>
+            </div>
+          </section>
 
-          <div class="mt-8 flex flex-wrap items-center gap-3">
-            <button id="get-started-btn" type="button" class="btn-primary">Get Started</button>
-            <span class="text-xs uppercase tracking-widest text-zinc-500">Upload -> Detect -> Preview -> Download</span>
-          </div>
+          <section id="how-it-works" class="content-section reveal">
+            <h2>Split Videos in 3 Simple Steps</h2>
+            <div class="grid gap-4 md:grid-cols-3">
+              <article class="landing-feature">
+                <h3><span class="feature-icon icon-step">1</span> Upload Your Video</h3>
+                <p>Drag and drop your video or select a file from your device.</p>
+              </article>
+              <article class="landing-feature">
+                <h3><span class="feature-icon icon-step">2</span> Detect Scene Changes</h3>
+                <p>The system analyzes visual changes and identifies scene boundaries automatically.</p>
+              </article>
+              <article class="landing-feature">
+                <h3><span class="feature-icon icon-step">3</span> Preview & Download</h3>
+                <p>Browse detected scenes, preview clips, and download exactly what you need.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="content-section reveal" id="features-section">
+            <h2>Everything You Need to Extract Video Scenes</h2>
+            <div class="feature-tiles">
+              <article class="feature-tile">
+                <span class="tile-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M10 13a5 5 0 0 1 0-7l1-1a5 5 0 0 1 7 7l-1 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M14 11a5 5 0 0 1 0 7l-1 1a5 5 0 0 1-7-7l1-1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                  </svg>
+                </span>
+                <h3>Automatic Scene Detection</h3>
+                <p>Detect scene boundaries automatically without manual timeline scrubbing.</p>
+              </article>
+              <article class="feature-tile">
+                <span class="tile-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-11Z" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M8 9h4M8 12h8M8 15h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                  </svg>
+                </span>
+                <h3>Scene Gallery</h3>
+                <p>Browse every detected scene in an organized visual grid.</p>
+              </article>
+              <article class="feature-tile">
+                <span class="tile-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" stroke="currentColor" stroke-width="1.7"/>
+                    <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.7"/>
+                  </svg>
+                </span>
+                <h3>Instant Preview</h3>
+                <p>Click any scene to preview it before downloading.</p>
+              </article>
+              <article class="feature-tile">
+                <span class="tile-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 3v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M8 11l4 4 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M4 20h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                  </svg>
+                </span>
+                <h3>Individual Downloads</h3>
+                <p>Download only the clips you need and skip the rest.</p>
+              </article>
+              <article class="feature-tile">
+                <span class="tile-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M8 6h11a2 2 0 0 1 2 2v9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M16 18H5a2 2 0 0 1-2-2V5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    <path d="M8 12h8M8 9h5M8 15h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                  </svg>
+                </span>
+                <h3>Download All Scenes</h3>
+                <p>Export all detected scenes in a single action.</p>
+              </article>
+              <article class="feature-tile">
+                <span class="tile-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.7"/>
+                  </svg>
+                </span>
+                <h3>Accurate Timestamps</h3>
+                <p>View scene start, end, and duration for every clip.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="content-section reveal" id="persona-section">
+            <h2>Who Uses Scene Splitter?</h2>
+            <div class="persona-wrap">
+              <div class="persona-chips">
+                <button class="persona-chip active" data-persona="editors">Video Editors</button>
+                <button class="persona-chip" data-persona="creators">Content Creators</button>
+                <button class="persona-chip" data-persona="youtube">YouTubers</button>
+                <button class="persona-chip" data-persona="research">Researchers</button>
+                <button class="persona-chip" data-persona="marketing">Marketing Teams</button>
+                <button class="persona-chip" data-persona="archives">Media Archives</button>
+              </div>
+              <div id="persona-detail" class="persona-detail">
+                <h3>Video Editors</h3>
+                <p>Quickly isolate usable shots from large footage collections.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="content-section reveal">
+            <h2>Stop Manually Scrubbing Through Videos</h2>
+            <p class="section-copy">
+              Finding individual scenes in long videos can take hours. Scene Splitter automatically identifies
+              scene boundaries and organizes every clip into an easy-to-browse gallery.
+            </p>
+            <p class="section-copy">
+              Instead of spending time searching through footage, focus on selecting and downloading the scenes
+              you actually need.
+            </p>
+          </section>
+
+          <section class="content-section reveal" id="usecase-section">
+            <h2>Example Use Cases</h2>
+            <div class="usecase-timeline">
+              <article class="usecase-item">
+                <span class="usecase-marker"></span>
+                <div>
+                  <h3>Extract B-Roll From Stock Footage Videos</h3>
+                  <p>Upload a long stock footage compilation and instantly access every individual shot.</p>
+                </div>
+              </article>
+              <article class="usecase-item">
+                <span class="usecase-marker"></span>
+                <div>
+                  <h3>Break Down Video Collections</h3>
+                  <p>Convert lengthy videos into organized scene libraries.</p>
+                </div>
+              </article>
+              <article class="usecase-item">
+                <span class="usecase-marker"></span>
+                <div>
+                  <h3>Find Reusable Clips</h3>
+                  <p>Build your own collection of reusable footage for future projects.</p>
+                </div>
+              </article>
+              <article class="usecase-item">
+                <span class="usecase-marker"></span>
+                <div>
+                  <h3>Analyze Scene Transitions</h3>
+                  <p>Review how videos are structured scene by scene.</p>
+                </div>
+              </article>
+              <div class="timeline-preview">
+                <div class="image-placeholder use-case-placeholder">
+                  <div class="placeholder-bars"><span></span><span></span></div>
+                  <p>Use Case Preview Placeholder</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="content-section reveal">
+            <h2>FAQ</h2>
+            <div class="faq-accordion" id="faq-accordion">
+              <div class="faq-row">
+                <button type="button" class="faq-q" aria-expanded="false">How does scene detection work?</button>
+                <div class="faq-a" aria-hidden="true"><div class="faq-a-inner">The app analyzes visual changes throughout the video and detects scene boundaries automatically.</div></div>
+              </div>
+              <div class="faq-row">
+                <button type="button" class="faq-q" aria-expanded="false">Can I preview clips before downloading?</button>
+                <div class="faq-a" aria-hidden="true"><div class="faq-a-inner">Yes. Every detected scene can be previewed directly in the browser.</div></div>
+              </div>
+              <div class="faq-row">
+                <button type="button" class="faq-q" aria-expanded="false">Can I download individual scenes?</button>
+                <div class="faq-a" aria-hidden="true"><div class="faq-a-inner">Yes. Download one scene or all scenes.</div></div>
+              </div>
+              <div class="faq-row">
+                <button type="button" class="faq-q" aria-expanded="false">Is there a limit on the number of scenes?</button>
+                <div class="faq-a" aria-hidden="true"><div class="faq-a-inner">The app is designed to handle videos containing hundreds of scene changes.</div></div>
+              </div>
+              <div class="faq-row">
+                <button type="button" class="faq-q" aria-expanded="false">Will my original video be modified?</button>
+                <div class="faq-a" aria-hidden="true"><div class="faq-a-inner">No. The original file remains unchanged.</div></div>
+              </div>
+              <div class="faq-row">
+                <button type="button" class="faq-q" aria-expanded="false">What video formats are supported?</button>
+                <div class="faq-a" aria-hidden="true"><div class="faq-a-inner">Most common video formats are supported.</div></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="content-section reveal">
+            <h2 class="cta-title">Ready to Split Your Videos?</h2>
+            <p class="section-copy cta-copy">Upload a video and automatically extract every scene in minutes.</p>
+            <div class="cta-center">
+              <button id="final-cta-btn" type="button" class="btn-primary">Start Splitting Videos</button>
+            </div>
+            <p class="cta-footnote">No editing experience required.</p>
+          </section>
         </div>
       </section>
 
       <section id="app-workspace" class="hidden">
+        <div class="workspace-inner">
         <header class="mb-6 mt-3 flex flex-col gap-4 border-b border-zinc-800 pb-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 class="text-2xl font-semibold">Scene Extraction Workspace</h2>
@@ -97,6 +295,7 @@
           </div>
           <div id="gallery" class="scene-grid"></div>
         </section>
+        </div>
       </section>
     </main>
 
@@ -111,7 +310,7 @@
           <a id="modal-download-unmuted-btn" href="#" download class="btn-unmuted">Download Unmuted</a>
           <a id="modal-download-muted-btn" href="#" download class="btn-muted">Download Muted</a>
         </div>
-      </section>
+      </div>
     </dialog>
 
     <script src="/script.js" defer></script>
