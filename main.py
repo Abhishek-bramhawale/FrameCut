@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 import uuid
@@ -11,11 +12,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import cloudinary_storage
 import cv2
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from scenedetect import AdaptiveDetector, ContentDetector, SceneManager, open_video
 
 BASE_DIR = Path(__file__).parent.resolve()
@@ -24,9 +27,15 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 JOBS_DIR = DATA_DIR / "jobs"
 STATIC_DIR = BASE_DIR / "web"
 IMAGES_DIR = BASE_DIR / "Images"
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
 
 for p in (UPLOADS_DIR, JOBS_DIR, STATIC_DIR, IMAGES_DIR):
     p.mkdir(parents=True, exist_ok=True)
+
+
+class CloudinaryJobStart(BaseModel):
+    source_public_id: str
+    original_name: str | None = None
 
 
 @dataclass
@@ -41,8 +50,13 @@ class JobState:
     expected_scenes: int = 0
     logs: list[str] = field(default_factory=list)
     scenes: list[dict[str, Any]] = field(default_factory=list)
+    source_cloudinary_id: str | None = None
+    cloudinary_resource_ids: list[str] = field(default_factory=list)
+    download_all_unmuted_external: str | None = None
+    download_all_muted_external: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        local_ready = self.status in {"processing", "done"}
         return {
             "id": self.id,
             "status": self.status,
@@ -53,12 +67,10 @@ class JobState:
             "total_scenes": len(self.scenes),
             "scenes": self.scenes,
             "logs": self.logs[-80:],
-            "download_all_unmuted_url": (
-                f"/api/jobs/{self.id}/download-all?muted=0" if self.status in {"processing", "done"} else None
-            ),
-            "download_all_muted_url": (
-                f"/api/jobs/{self.id}/download-all?muted=1" if self.status in {"processing", "done"} else None
-            ),
+            "download_all_unmuted_url": self.download_all_unmuted_external
+            or (f"/api/jobs/{self.id}/download-all?muted=0" if local_ready else None),
+            "download_all_muted_url": self.download_all_muted_external
+            or (f"/api/jobs/{self.id}/download-all?muted=1" if local_ready else None),
         }
 
 
@@ -410,6 +422,7 @@ def _detect_and_split(job_id: str) -> None:
                             "muted_clip_url": f"/api/jobs/{job_id}/clip/{muted_clip_name}",
                             "download_unmuted_url": f"/api/jobs/{job_id}/clip/{clip_name}?download=1",
                             "download_muted_url": f"/api/jobs/{job_id}/clip/{muted_clip_name}?download=1",
+                            "thumbnail_name": thumb_name,
                             "clip_name": clip_name,
                             "muted_clip_name": muted_clip_name,
                         }
@@ -446,11 +459,100 @@ def _detect_and_split(job_id: str) -> None:
                 clip_file = output_clips_dir / scene["muted_clip_name"]
                 zf.write(clip_file, arcname=scene["muted_clip_name"])
 
-        _set_job(job_id, scenes=scenes_payload, progress=100, status="done", stage="Completed")
+        if cloudinary_storage.is_enabled() and job.output_dir:
+            _append_log(job_id, "Publishing outputs to Cloudinary.")
+            _set_job(job_id, progress=97, stage="Publishing outputs to Cloudinary")
+            scenes_payload, unmuted_zip_url, muted_zip_url = cloudinary_storage.publish_job_outputs(
+                job_id, job.output_dir, scenes_payload
+            )
+            _set_job(
+                job_id,
+                scenes=scenes_payload,
+                download_all_unmuted_external=unmuted_zip_url,
+                download_all_muted_external=muted_zip_url,
+            )
+            if job.input_video and job.input_video.exists():
+                job.input_video.unlink(missing_ok=True)
+            shutil.rmtree(job.output_dir, ignore_errors=True)
+            job.output_dir = None
+            job.input_video = None
+
+        _set_job(job_id, progress=100, status="done", stage="Completed")
         _append_log(job_id, "Processing complete.")
     except Exception as exc:  # noqa: BLE001
         _set_job(job_id, status="failed", stage="Failed", error=str(exc), progress=100)
         _append_log(job_id, f"Failed: {exc}")
+
+
+def _start_job(job_id: str, video_path: Path, source_cloudinary_id: str | None = None) -> None:
+    output_dir = JOBS_DIR / job_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with jobs_lock:
+        jobs[job_id] = JobState(
+            id=job_id,
+            input_video=video_path,
+            output_dir=output_dir,
+            source_cloudinary_id=source_cloudinary_id,
+        )
+    worker = threading.Thread(target=_detect_and_split, args=(job_id,), daemon=True)
+    worker.start()
+
+
+def _cleanup_job(job_id: str) -> None:
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job:
+        return
+
+    extra_ids = [job.source_cloudinary_id] if job.source_cloudinary_id else None
+    if cloudinary_storage.is_enabled():
+        cloudinary_storage.delete_job_assets(job_id, extra_ids)
+
+    if job.output_dir and job.output_dir.exists():
+        shutil.rmtree(job.output_dir, ignore_errors=True)
+    if job.input_video and job.input_video.exists():
+        job.input_video.unlink(missing_ok=True)
+
+    with jobs_lock:
+        jobs.pop(job_id, None)
+
+
+@app.get("/api/config")
+def get_config() -> JSONResponse:
+    return JSONResponse(
+        {
+            "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
+            "cloudinary": cloudinary_storage.public_config(),
+            "storage_mode": "cloudinary" if cloudinary_storage.is_enabled() else "local",
+        }
+    )
+
+
+@app.post("/api/jobs/start")
+async def start_job_from_cloudinary(body: CloudinaryJobStart) -> JSONResponse:
+    if not cloudinary_storage.is_enabled():
+        raise HTTPException(status_code=400, detail="Cloudinary is not configured on the server.")
+
+    ext = Path(body.original_name or "video.mp4").suffix.lower()
+    if ext not in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}:
+        ext = ".mp4"
+
+    job_id = uuid.uuid4().hex[:12]
+    video_path = UPLOADS_DIR / f"{job_id}{ext}"
+    try:
+        cloudinary_storage.download_source_video(body.source_public_id, video_path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Could not fetch Cloudinary video: {exc}") from exc
+
+    if video_path.stat().st_size > MAX_UPLOAD_BYTES:
+        video_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max upload size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+
+    _start_job(job_id, video_path, source_cloudinary_id=body.source_public_id)
+    return JSONResponse({"job_id": job_id})
 
 
 @app.post("/api/upload")
@@ -467,17 +569,29 @@ async def upload_video(file: UploadFile = File(...)) -> JSONResponse:
     output_dir = JOBS_DIR / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    bytes_read = 0
     with video_path.open("wb") as f:
         while chunk := await file.read(1024 * 1024):
+            bytes_read += len(chunk)
+            if bytes_read > MAX_UPLOAD_BYTES:
+                try:
+                    video_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Max upload size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                )
             f.write(chunk)
 
-    with jobs_lock:
-        jobs[job_id] = JobState(id=job_id, input_video=video_path, output_dir=output_dir)
-
-    worker = threading.Thread(target=_detect_and_split, args=(job_id,), daemon=True)
-    worker.start()
-
+    _start_job(job_id, video_path)
     return JSONResponse({"job_id": job_id})
+
+
+@app.api_route("/api/jobs/{job_id}/cleanup", methods=["DELETE", "POST"])
+def cleanup_job(job_id: str) -> JSONResponse:
+    _cleanup_job(job_id)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/jobs/{job_id}")
