@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import gc
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -13,13 +15,11 @@ from pathlib import Path
 from typing import Any
 
 import cloudinary_storage
-import cv2
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from scenedetect import AdaptiveDetector, ContentDetector, SceneManager, open_video
 
 BASE_DIR = Path(__file__).parent.resolve()
 DATA_DIR = BASE_DIR / "data"
@@ -28,6 +28,7 @@ JOBS_DIR = DATA_DIR / "jobs"
 STATIC_DIR = BASE_DIR / "web"
 IMAGES_DIR = BASE_DIR / "Images"
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
+_SCENE_TIME_RE = re.compile(r"pts_time:([0-9.]+)")
 
 for p in (UPLOADS_DIR, JOBS_DIR, STATIC_DIR, IMAGES_DIR):
     p.mkdir(parents=True, exist_ok=True)
@@ -76,8 +77,69 @@ class JobState:
 
 jobs: dict[str, JobState] = {}
 jobs_lock = threading.Lock()
+_jobs_slot_lock = threading.Lock()
+_active_processing_jobs = 0
 _nvenc_checked = False
 _nvenc_available = False
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _low_memory_enabled() -> bool:
+    # Dockerfile sets FRAMCUT_LOW_MEMORY=1 on Render; default off for local dev.
+    return _env_flag("FRAMECUT_LOW_MEMORY", default=False)
+
+
+def _max_concurrent_jobs() -> int:
+    raw = os.getenv("FRAMECUT_MAX_CONCURRENT_JOBS")
+    if raw is not None and raw.strip().isdigit():
+        return max(1, int(raw.strip()))
+    return 1 if _low_memory_enabled() else 2
+
+
+def _max_export_workers() -> int:
+    raw = os.getenv("FRAMECUT_MAX_EXPORT_WORKERS")
+    if raw is not None and raw.strip().isdigit():
+        return max(1, int(raw.strip()))
+    if _low_memory_enabled():
+        return 1
+    cpu_count = os.cpu_count() or 4
+    return max(1, min(3, cpu_count // 2))
+
+
+def _scene_detection_method() -> str:
+    method = (os.getenv("FRAMECUT_SCENE_METHOD") or "").strip().lower()
+    if method in {"ffmpeg", "pyscenedetect"}:
+        return method
+    return "ffmpeg" if _low_memory_enabled() else "pyscenedetect"
+
+
+def _reserve_job_slot() -> bool:
+    global _active_processing_jobs
+    with _jobs_slot_lock:
+        if _active_processing_jobs >= _max_concurrent_jobs():
+            return False
+        _active_processing_jobs += 1
+        return True
+
+
+def _release_job_slot() -> None:
+    global _active_processing_jobs
+    with _jobs_slot_lock:
+        _active_processing_jobs = max(0, _active_processing_jobs - 1)
+
+
+def _ensure_job_capacity() -> None:
+    if not _reserve_job_slot():
+        raise HTTPException(
+            status_code=503,
+            detail="Server is processing another video. Please wait and try again shortly.",
+        )
 
 app = FastAPI(title="Scene Splitter Clips")
 app.add_middleware(
@@ -164,13 +226,161 @@ def _nvenc_runtime_available() -> bool:
     return _nvenc_available
 
 
+def _ffprobe_value(video_path: Path, args: list[str]) -> str:
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", *args, str(video_path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    return (result.stdout or "").strip()
+
+
 def _video_fps(video_path: Path) -> float:
-    cap = cv2.VideoCapture(str(video_path))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
-    cap.release()
-    if fps <= 0:
+    rate = _ffprobe_value(
+        video_path,
+        [
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=avg_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ],
+    )
+    if not rate:
         return 30.0
-    return fps
+    if "/" in rate:
+        num, den = rate.split("/", 1)
+        den_f = float(den or 1)
+        if den_f <= 0:
+            return 30.0
+        fps = float(num) / den_f
+    else:
+        fps = float(rate)
+    return fps if fps > 0 else 30.0
+
+
+def _video_duration(video_path: Path) -> float:
+    raw = _ffprobe_value(
+        video_path,
+        ["-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"],
+    )
+    try:
+        duration = float(raw)
+    except ValueError:
+        return 0.0
+    return duration if duration > 0 else 0.0
+
+
+def _detect_scenes_ffmpeg(
+    video_path: Path,
+    threshold: float = 0.35,
+    min_scene_sec: float = 0.5,
+) -> list[tuple[float, float]]:
+    """Stream-based scene detection via FFmpeg (low RAM, suitable for small containers)."""
+    proc = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(video_path),
+            "-filter:v",
+            f"select='gt(scene,{threshold})',showinfo",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    cut_times = [0.0]
+    for line in proc.stderr.splitlines():
+        match = _SCENE_TIME_RE.search(line)
+        if match:
+            cut_times.append(float(match.group(1)))
+
+    duration = _video_duration(video_path)
+    if duration <= 0:
+        return [(0.0, 0.0)]
+
+    cut_times.append(duration)
+    cut_times = sorted(set(cut_times))
+
+    segments: list[tuple[float, float]] = []
+    for start, end in zip(cut_times, cut_times[1:]):
+        if end > start and (end - start) >= min_scene_sec:
+            segments.append((start, end))
+
+    if not segments:
+        segments = [(0.0, duration)]
+    return segments
+
+
+def _detect_scenes_pyscenedetect(video_path: Path, job_id: str) -> list[tuple[float, float]]:
+    from scenedetect import ContentDetector, SceneManager, open_video
+
+    video = open_video(str(video_path))
+    scene_manager = SceneManager()
+    scene_manager.auto_downscale = True
+
+    if _low_memory_enabled():
+        scene_manager.add_detector(ContentDetector(threshold=27.0, min_scene_len=15))
+        frame_skip = 1 if _video_duration(video_path) > 300 else 0
+    else:
+        from scenedetect import AdaptiveDetector
+
+        scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=3.0, min_scene_len=12))
+        scene_manager.add_detector(ContentDetector(threshold=27.0, min_scene_len=12))
+        frame_skip = 0
+
+    _append_log(job_id, "Analyzing visual cuts and transitions.")
+    scene_manager.detect_scenes(video=video, show_progress=False, frame_skip=frame_skip)
+    scene_list = scene_manager.get_scene_list()
+
+    fps = _video_fps(video_path)
+    segments: list[tuple[float, float]] = []
+    if not scene_list:
+        duration = _video_duration(video_path)
+        if duration > 0:
+            segments = [(0.0, duration)]
+    else:
+        for start_tc, end_tc in scene_list:
+            start_sec = start_tc.get_frames() / fps
+            end_sec = end_tc.get_frames() / fps
+            if end_sec > start_sec:
+                segments.append((start_sec, end_sec))
+
+    del video
+    del scene_manager
+    gc.collect()
+    return segments
+
+
+def _scene_api_payload(job_id: str, scene: dict[str, Any]) -> dict[str, Any]:
+    clip_name = scene["clip_name"]
+    muted_clip_name = scene["muted_clip_name"]
+    thumb_name = scene["thumbnail_name"]
+    return {
+        "scene_number": scene["scene_number"],
+        "start_seconds": scene["start_seconds"],
+        "end_seconds": scene["end_seconds"],
+        "duration_seconds": scene["duration_seconds"],
+        "start_timestamp": scene["start_timestamp"],
+        "end_timestamp": scene["end_timestamp"],
+        "duration_timestamp": scene["duration_timestamp"],
+        "thumbnail_url": f"/api/jobs/{job_id}/thumb/{thumb_name}",
+        "clip_url": f"/api/jobs/{job_id}/clip/{clip_name}",
+        "muted_clip_url": f"/api/jobs/{job_id}/clip/{muted_clip_name}",
+        "download_unmuted_url": f"/api/jobs/{job_id}/clip/{clip_name}?download=1",
+        "download_muted_url": f"/api/jobs/{job_id}/clip/{muted_clip_name}?download=1",
+        "thumbnail_name": thumb_name,
+        "clip_name": clip_name,
+        "muted_clip_name": muted_clip_name,
+    }
 
 
 def _encode_params() -> list[str]:
@@ -328,31 +538,18 @@ def _detect_and_split(job_id: str) -> None:
     assert job.output_dir is not None
 
     try:
+        method = _scene_detection_method()
         _set_job(job_id, status="processing", progress=2, stage="Initializing detector")
-        _append_log(job_id, "Initializing scene detector.")
-
-        video = open_video(str(job.input_video))
-        scene_manager = SceneManager()
-
-        # A hybrid detector setup improves robustness:
-        # - Adaptive detector resists false positives from camera motion/light changes.
-        # - Content detector catches hard cuts and sharp transitions.
-        scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=3.0, min_scene_len=12))
-        scene_manager.add_detector(ContentDetector(threshold=27.0, min_scene_len=12))
+        _append_log(job_id, f"Initializing scene detector ({method}).")
 
         _set_job(job_id, progress=8, stage="Analyzing video for scene boundaries")
-        _append_log(job_id, "Analyzing visual cuts and transitions.")
-        scene_manager.detect_scenes(video=video, show_progress=False)
-        scene_list = scene_manager.get_scene_list()
+        if method == "ffmpeg":
+            _append_log(job_id, "Analyzing cuts with FFmpeg (low-memory mode).")
+            time_segments = _detect_scenes_ffmpeg(job.input_video)
+        else:
+            time_segments = _detect_scenes_pyscenedetect(job.input_video, job_id)
 
-        if not scene_list:
-            # Fallback: full video as single scene.
-            frame_count = int(video.duration.get_frames())
-            fps = _video_fps(job.input_video)
-            duration = frame_count / fps if fps > 0 else 0.0
-            scene_list = [(video.base_timecode, video.base_timecode + frame_count)]
-            _ = duration  # Keep reference for clarity if needed.
-
+        gc.collect()
         _set_job(job_id, progress=62, stage="Preparing clips")
         _append_log(job_id, "Scene analysis complete. Preparing clip export.")
 
@@ -361,29 +558,22 @@ def _detect_and_split(job_id: str) -> None:
         output_clips_dir.mkdir(parents=True, exist_ok=True)
         thumbs_dir.mkdir(parents=True, exist_ok=True)
 
-        fps = _video_fps(job.input_video)
         segments: list[tuple[int, float, float]] = []
-        for idx, (start_tc, end_tc) in enumerate(scene_list, start=1):
-            start_sec = start_tc.get_frames() / fps
-            end_sec = end_tc.get_frames() / fps
-            if end_sec > start_sec:
-                segments.append((idx, start_sec, end_sec))
+        for idx, (start_sec, end_sec) in enumerate(time_segments, start=1):
+            segments.append((idx, start_sec, end_sec))
 
         total = len(segments)
         encode_params = _encode_params()
-        _set_job(job_id, expected_scenes=total)
+        _set_job(job_id, expected_scenes=total, scenes=[])
         _append_log(job_id, f"Detected {total} scenes.")
-        cpu_count = os.cpu_count() or 4
-        # Keep worker count modest for small containers (e.g. Render free tier).
-        max_workers = max(1, min(3, cpu_count // 2))
+        max_workers = _max_export_workers()
         _set_job(
             job_id,
-            stage=f"Exporting clips in parallel ({max_workers} workers)",
+            stage=f"Exporting clips ({max_workers} worker{'s' if max_workers != 1 else ''})",
             progress=64,
         )
-        _append_log(job_id, f"Export started with {max_workers} parallel workers.")
+        _append_log(job_id, f"Export started with {max_workers} parallel worker(s).")
 
-        results_by_scene: dict[int, dict[str, Any]] = {}
         completed = 0
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
@@ -402,41 +592,23 @@ def _detect_and_split(job_id: str) -> None:
             for future in as_completed(futures):
                 completed += 1
                 item = future.result()
-                results_by_scene[item["scene_number"]] = item
-                partial_payload = []
-                for scene_num in sorted(results_by_scene):
-                    scene = results_by_scene[scene_num]
-                    clip_name = scene["clip_name"]
-                    muted_clip_name = scene["muted_clip_name"]
-                    thumb_name = scene["thumbnail_name"]
-                    partial_payload.append(
-                        {
-                            "scene_number": scene["scene_number"],
-                            "start_seconds": scene["start_seconds"],
-                            "end_seconds": scene["end_seconds"],
-                            "duration_seconds": scene["duration_seconds"],
-                            "start_timestamp": scene["start_timestamp"],
-                            "end_timestamp": scene["end_timestamp"],
-                            "duration_timestamp": scene["duration_timestamp"],
-                            "thumbnail_url": f"/api/jobs/{job_id}/thumb/{thumb_name}",
-                            "clip_url": f"/api/jobs/{job_id}/clip/{clip_name}",
-                            "muted_clip_url": f"/api/jobs/{job_id}/clip/{muted_clip_name}",
-                            "download_unmuted_url": f"/api/jobs/{job_id}/clip/{clip_name}?download=1",
-                            "download_muted_url": f"/api/jobs/{job_id}/clip/{muted_clip_name}?download=1",
-                            "thumbnail_name": thumb_name,
-                            "clip_name": clip_name,
-                            "muted_clip_name": muted_clip_name,
-                        }
+                payload_item = _scene_api_payload(job_id, item)
+                with jobs_lock:
+                    job_ref = jobs[job_id]
+                    job_ref.scenes = sorted(
+                        [s for s in job_ref.scenes if s["scene_number"] != item["scene_number"]]
+                        + [payload_item],
+                        key=lambda s: s["scene_number"],
                     )
                 step = 64 + int((completed / max(total, 1)) * 31)
                 _set_job(
                     job_id,
                     progress=min(step, 96),
                     stage=f"Exporting clips ({completed}/{total})",
-                    scenes=partial_payload,
                 )
                 _append_log(job_id, f"Clip {item['scene_number']} ready ({completed}/{total}).")
 
+        gc.collect()
         with jobs_lock:
             scenes_payload = list(jobs[job_id].scenes)
 
@@ -483,9 +655,13 @@ def _detect_and_split(job_id: str) -> None:
     except Exception as exc:  # noqa: BLE001
         _set_job(job_id, status="failed", stage="Failed", error=str(exc), progress=100)
         _append_log(job_id, f"Failed: {exc}")
+    finally:
+        _release_job_slot()
+        gc.collect()
 
 
 def _start_job(job_id: str, video_path: Path, source_cloudinary_id: str | None = None) -> None:
+    _ensure_job_capacity()
     output_dir = JOBS_DIR / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
     with jobs_lock:
@@ -525,6 +701,9 @@ def get_config() -> JSONResponse:
             "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
             "cloudinary": cloudinary_storage.public_config(),
             "storage_mode": "cloudinary" if cloudinary_storage.is_enabled() else "local",
+            "low_memory_mode": _low_memory_enabled(),
+            "scene_detection": _scene_detection_method(),
+            "max_concurrent_jobs": _max_concurrent_jobs(),
         }
     )
 

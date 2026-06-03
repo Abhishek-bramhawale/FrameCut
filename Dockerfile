@@ -16,8 +16,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV PORT=8000
+ENV PORT=8000 \
+    FRAMCUT_LOW_MEMORY=1 \
+    FRAMCUT_MAX_CONCURRENT_JOBS=1 \
+    FRAMCUT_MAX_EXPORT_WORKERS=1 \
+    FRAMCUT_SCENE_METHOD=ffmpeg
 EXPOSE 8000
 
-CMD ["bash", "-lc", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["bash", "-lc", "uvicorn main:app --host 0.0.0.0 --port ${PORT} --workers 1"]
 
