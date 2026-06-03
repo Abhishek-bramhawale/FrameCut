@@ -90,30 +90,61 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int | None = None) -> int | None:
+    raw = _env_get(name)
+    if raw is None or not raw.strip().isdigit():
+        return default
+    return int(raw.strip())
+
+
+def _env_get(name: str) -> str | None:
+    """Read FRAMECUT_* with fallback for the old FRAMCUT_* typo in early Dockerfiles."""
+    value = os.getenv(name)
+    if value is not None:
+        return value
+    if name.startswith("FRAMECUT_"):
+        return os.getenv("FRAMCUT_" + name[len("FRAMECUT_") :])
+    return None
+
+
+def _running_on_render() -> bool:
+    return bool(os.getenv("RENDER"))
+
+
 def _low_memory_enabled() -> bool:
-    # Dockerfile sets FRAMCUT_LOW_MEMORY=1 on Render; default off for local dev.
-    return _env_flag("FRAMECUT_LOW_MEMORY", default=False)
+    explicit = _env_get("FRAMECUT_LOW_MEMORY")
+    if explicit is not None:
+        return explicit.strip().lower() in {"1", "true", "yes", "on"}
+    # Render free tier (~512 MB) — enable safe defaults without relying on env typos.
+    return _running_on_render()
 
 
 def _max_concurrent_jobs() -> int:
-    raw = os.getenv("FRAMECUT_MAX_CONCURRENT_JOBS")
-    if raw is not None and raw.strip().isdigit():
-        return max(1, int(raw.strip()))
+    raw = _env_int("FRAMECUT_MAX_CONCURRENT_JOBS")
+    if raw is not None:
+        return max(1, raw)
     return 1 if _low_memory_enabled() else 2
 
 
 def _max_export_workers() -> int:
-    raw = os.getenv("FRAMECUT_MAX_EXPORT_WORKERS")
-    if raw is not None and raw.strip().isdigit():
-        return max(1, int(raw.strip()))
+    raw = _env_int("FRAMECUT_MAX_EXPORT_WORKERS")
+    if raw is not None:
+        return max(1, raw)
     if _low_memory_enabled():
         return 1
     cpu_count = os.cpu_count() or 4
     return max(1, min(3, cpu_count // 2))
 
 
+def _max_scenes() -> int | None:
+    raw = _env_int("FRAMECUT_MAX_SCENES")
+    if raw is not None:
+        return max(1, raw)
+    return 100 if _low_memory_enabled() else None
+
+
 def _scene_detection_method() -> str:
-    method = (os.getenv("FRAMECUT_SCENE_METHOD") or "").strip().lower()
+    method = (_env_get("FRAMECUT_SCENE_METHOD") or "").strip().lower()
     if method in {"ffmpeg", "pyscenedetect"}:
         return method
     return "ffmpeg" if _low_memory_enabled() else "pyscenedetect"
@@ -274,11 +305,35 @@ def _video_duration(video_path: Path) -> float:
     return duration if duration > 0 else 0.0
 
 
+def _merge_segments_to_cap(
+    segments: list[tuple[float, float]], max_scenes: int
+) -> list[tuple[float, float]]:
+    """Merge shortest adjacent scenes until count is within max_scenes."""
+    merged = list(segments)
+    while len(merged) > max_scenes:
+        best_i = 0
+        best_span = float("inf")
+        for i in range(len(merged) - 1):
+            span = merged[i + 1][1] - merged[i][0]
+            if span < best_span:
+                best_span = span
+                best_i = i
+        start = merged[best_i][0]
+        end = merged[best_i + 1][1]
+        merged[best_i] = (start, end)
+        del merged[best_i + 1]
+    return merged
+
+
 def _detect_scenes_ffmpeg(
     video_path: Path,
-    threshold: float = 0.35,
-    min_scene_sec: float = 0.5,
+    threshold: float | None = None,
+    min_scene_sec: float | None = None,
 ) -> list[tuple[float, float]]:
+    if threshold is None:
+        threshold = 0.42 if _low_memory_enabled() else 0.35
+    if min_scene_sec is None:
+        min_scene_sec = 1.2 if _low_memory_enabled() else 0.5
     """Stream-based scene detection via FFmpeg (low RAM, suitable for small containers)."""
     proc = subprocess.run(
         [
@@ -317,6 +372,10 @@ def _detect_scenes_ffmpeg(
 
     if not segments:
         segments = [(0.0, duration)]
+
+    cap = _max_scenes()
+    if cap is not None and len(segments) > cap:
+        segments = _merge_segments_to_cap(segments, cap)
     return segments
 
 
@@ -357,6 +416,9 @@ def _detect_scenes_pyscenedetect(video_path: Path, job_id: str) -> list[tuple[fl
     del video
     del scene_manager
     gc.collect()
+    cap = _max_scenes()
+    if cap is not None and len(segments) > cap:
+        segments = _merge_segments_to_cap(segments, cap)
     return segments
 
 
@@ -384,6 +446,21 @@ def _scene_api_payload(job_id: str, scene: dict[str, Any]) -> dict[str, Any]:
 
 
 def _encode_params() -> list[str]:
+    if _low_memory_enabled():
+        return [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "23",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+        ]
     # Fast default profile focused on throughput while preserving visual quality.
     # NVIDIA is preferred when available to make large scene batches much faster.
     if _nvenc_runtime_available():
@@ -419,6 +496,134 @@ def _encode_params() -> list[str]:
         "-movflags",
         "+faststart",
     ]
+
+
+def _extract_scene_stream_copy(
+    idx: int,
+    start_sec: float,
+    end_sec: float,
+    input_video: Path,
+    clips_dir: Path,
+    thumbs_dir: Path,
+) -> dict[str, Any]:
+    """Cut clips with stream copy (no re-encode) — minimal RAM per scene."""
+    duration = end_sec - start_sec
+    clip_name = f"scene_{idx:04d}.mp4"
+    muted_clip_name = f"scene_{idx:04d}_muted.mp4"
+    thumb_name = f"scene_{idx:04d}.jpg"
+    clip_path = clips_dir / clip_name
+    muted_clip_path = clips_dir / muted_clip_name
+    thumb_path = thumbs_dir / thumb_name
+
+    cut_cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        f"{start_sec:.6f}",
+        "-to",
+        f"{end_sec:.6f}",
+        "-i",
+        str(input_video),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "make_zero",
+        "-movflags",
+        "+faststart",
+        str(clip_path),
+    ]
+    try:
+        _run(cut_cmd)
+    except RuntimeError:
+        # Non-keyframe cuts can fail with copy; fall back to a light single-thread encode.
+        _run(
+            [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                f"{start_sec:.6f}",
+                "-to",
+                f"{end_sec:.6f}",
+                "-i",
+                str(input_video),
+                "-threads",
+                "1",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "23",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
+                str(clip_path),
+            ]
+        )
+
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(clip_path),
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "copy",
+            "-an",
+            str(muted_clip_path),
+        ]
+    )
+
+    thumb_at = min(start_sec + 0.15, max(start_sec, end_sec - 0.05))
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{thumb_at:.6f}",
+            "-i",
+            str(input_video),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "5",
+            str(thumb_path),
+        ]
+    )
+
+    return {
+        "scene_number": idx,
+        "start_seconds": round(start_sec, 3),
+        "end_seconds": round(end_sec, 3),
+        "duration_seconds": round(duration, 3),
+        "start_timestamp": _fmt_time(start_sec),
+        "end_timestamp": _fmt_time(end_sec),
+        "duration_timestamp": _fmt_time(duration),
+        "thumbnail_name": thumb_name,
+        "clip_name": clip_name,
+        "muted_clip_name": muted_clip_name,
+    }
 
 
 def _extract_scene(
@@ -563,50 +768,72 @@ def _detect_and_split(job_id: str) -> None:
             segments.append((idx, start_sec, end_sec))
 
         total = len(segments)
+        low_mem = _low_memory_enabled()
         encode_params = _encode_params()
         _set_job(job_id, expected_scenes=total, scenes=[])
-        _append_log(job_id, f"Detected {total} scenes.")
+        cap = _max_scenes()
+        if cap is not None and total >= cap:
+            _append_log(
+                job_id,
+                f"Detected {total} scenes (capped/merged to {cap} for server memory limits).",
+            )
+        else:
+            _append_log(job_id, f"Detected {total} scenes.")
+
         max_workers = _max_export_workers()
-        _set_job(
-            job_id,
-            stage=f"Exporting clips ({max_workers} worker{'s' if max_workers != 1 else ''})",
-            progress=64,
-        )
-        _append_log(job_id, f"Export started with {max_workers} parallel worker(s).")
+        export_mode = "stream-copy, one at a time" if low_mem else f"{max_workers} parallel worker(s)"
+        _set_job(job_id, stage=f"Exporting clips ({export_mode})", progress=64)
+        _append_log(job_id, f"Export started ({export_mode}).")
 
         completed = 0
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(
-                    _extract_scene,
-                    idx,
-                    start_sec,
-                    end_sec,
-                    job.input_video,
-                    output_clips_dir,
-                    thumbs_dir,
-                    encode_params,
-                ): idx
-                for idx, start_sec, end_sec in segments
-            }
-            for future in as_completed(futures):
-                completed += 1
-                item = future.result()
-                payload_item = _scene_api_payload(job_id, item)
-                with jobs_lock:
-                    job_ref = jobs[job_id]
-                    job_ref.scenes = sorted(
-                        [s for s in job_ref.scenes if s["scene_number"] != item["scene_number"]]
-                        + [payload_item],
-                        key=lambda s: s["scene_number"],
-                    )
-                step = 64 + int((completed / max(total, 1)) * 31)
-                _set_job(
-                    job_id,
-                    progress=min(step, 96),
-                    stage=f"Exporting clips ({completed}/{total})",
+
+        def _export_one(idx: int, start_sec: float, end_sec: float) -> dict[str, Any]:
+            if low_mem:
+                return _extract_scene_stream_copy(
+                    idx, start_sec, end_sec, job.input_video, output_clips_dir, thumbs_dir
                 )
+            return _extract_scene(
+                idx,
+                start_sec,
+                end_sec,
+                job.input_video,
+                output_clips_dir,
+                thumbs_dir,
+                encode_params,
+            )
+
+        def _record_export(item: dict[str, Any]) -> None:
+            nonlocal completed
+            completed += 1
+            payload_item = _scene_api_payload(job_id, item)
+            with jobs_lock:
+                job_ref = jobs[job_id]
+                job_ref.scenes = sorted(
+                    [s for s in job_ref.scenes if s["scene_number"] != item["scene_number"]]
+                    + [payload_item],
+                    key=lambda s: s["scene_number"],
+                )
+            step = 64 + int((completed / max(total, 1)) * 31)
+            _set_job(
+                job_id,
+                progress=min(step, 96),
+                stage=f"Exporting clips ({completed}/{total})",
+            )
+            if completed == total or completed % 5 == 0:
                 _append_log(job_id, f"Clip {item['scene_number']} ready ({completed}/{total}).")
+            gc.collect()
+
+        if max_workers <= 1:
+            for idx, start_sec, end_sec in segments:
+                _record_export(_export_one(idx, start_sec, end_sec))
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(_export_one, idx, start_sec, end_sec): idx
+                    for idx, start_sec, end_sec in segments
+                }
+                for future in as_completed(futures):
+                    _record_export(future.result())
 
         gc.collect()
         with jobs_lock:
@@ -704,6 +931,8 @@ def get_config() -> JSONResponse:
             "low_memory_mode": _low_memory_enabled(),
             "scene_detection": _scene_detection_method(),
             "max_concurrent_jobs": _max_concurrent_jobs(),
+            "max_export_workers": _max_export_workers(),
+            "max_scenes": _max_scenes(),
         }
     )
 

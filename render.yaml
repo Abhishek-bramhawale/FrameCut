@@ -5,4 +5,14 @@ services:
     plan: free
     autoDeploy: true
     healthCheckPath: /
-
+    envVars:
+      - key: FRAMECUT_LOW_MEMORY
+        value: "1"
+      - key: FRAMECUT_MAX_CONCURRENT_JOBS
+        value: "1"
+      - key: FRAMECUT_MAX_EXPORT_WORKERS
+        value: "1"
+      - key: FRAMECUT_MAX_SCENES
+        value: "100"
+      - key: FRAMECUT_SCENE_METHOD
+        value: ffmpeg
