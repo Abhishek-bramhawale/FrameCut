@@ -14,9 +14,13 @@ const faqAccordion = document.getElementById("faq-accordion");
 const uploadCard = document.getElementById("upload-card");
 const progressCard = document.getElementById("progress-card");
 const resultsCard = document.getElementById("results-card");
-const progressBar = document.getElementById("progress-bar");
-const progressPercent = document.getElementById("progress-percent");
-const progressStage = document.getElementById("progress-stage");
+const processingProgressBlock = document.getElementById("processing-progress-block");
+const uploadProgressBar = document.getElementById("upload-progress-bar");
+const uploadProgressPercent = document.getElementById("upload-progress-percent");
+const uploadProgressStage = document.getElementById("upload-progress-stage");
+const processingProgressBar = document.getElementById("processing-progress-bar");
+const processingProgressPercent = document.getElementById("processing-progress-percent");
+const processingProgressStage = document.getElementById("processing-progress-stage");
 const logLine = document.getElementById("log-line");
 const gallery = document.getElementById("gallery");
 const sceneTotal = document.getElementById("scene-total");
@@ -36,6 +40,8 @@ const heroBlock = landingPage?.querySelector(".hero-block");
 let currentJobId = null;
 let currentJobCompleted = false;
 let pollTimer = null;
+let pollFailCount = 0;
+const MAX_POLL_FAILS = 4;
 let lastRenderedSceneCount = 0;
 let lastLogCount = 0;
 let syntheticLogIndex = 0;
@@ -379,10 +385,65 @@ function initializeFaqAccordion() {
   });
 }
 
-function setProgress(progress, stage) {
-  progressBar.style.width = `${progress}%`;
-  progressPercent.textContent = `${progress}%`;
-  progressStage.textContent = stage || "Processing...";
+function clampPercent(value) {
+  return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+}
+
+function setUploadProgress(progress, stage) {
+  const pct = clampPercent(progress);
+  uploadProgressBar.style.width = `${pct}%`;
+  uploadProgressPercent.textContent = `${pct}%`;
+  if (stage) uploadProgressStage.textContent = stage;
+}
+
+function setProcessingProgress(progress, stage) {
+  const pct = clampPercent(progress);
+  processingProgressBar.style.width = `${pct}%`;
+  processingProgressPercent.textContent = `${pct}%`;
+  if (stage) processingProgressStage.textContent = stage;
+}
+
+function setProcessingEnabled(enabled) {
+  if (!processingProgressBlock) return;
+  processingProgressBlock.classList.toggle("is-disabled", !enabled);
+}
+
+function resetProgressUi() {
+  setUploadProgress(0, "Waiting for file...");
+  setProcessingProgress(0, "Waiting for upload to finish...");
+  setProcessingEnabled(false);
+}
+
+function xhrUpload(url, body, headers = {}, onUploadProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onUploadProgress) return;
+      onUploadProgress(clampPercent((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => {
+      let payload = {};
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+      } catch {
+        payload = { detail: xhr.responseText || "Invalid server response." };
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload);
+        return;
+      }
+      const detail =
+        payload.detail ||
+        payload.error?.message ||
+        payload.message ||
+        `Request failed (${xhr.status}).`;
+      reject(new Error(typeof detail === "string" ? detail : JSON.stringify(detail)));
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload."));
+    xhr.send(body);
+  });
 }
 
 function formatDurationHuman(durationSeconds) {
@@ -407,7 +468,7 @@ function maxUploadBytes() {
   return (appConfig.max_upload_mb || 200) * 1024 * 1024;
 }
 
-async function uploadViaCloudinary(file) {
+async function uploadViaCloudinary(file, onUploadProgress) {
   const cloudinary = appConfig.cloudinary;
   if (!cloudinary?.cloud_name || !cloudinary?.upload_preset) {
     throw new Error("Cloudinary is not configured.");
@@ -418,47 +479,43 @@ async function uploadViaCloudinary(file) {
   formData.append("upload_preset", cloudinary.upload_preset);
   formData.append("folder", "framecut/incoming");
 
-  const uploadRes = await fetch(
+  const uploaded = await xhrUpload(
     `https://api.cloudinary.com/v1_1/${cloudinary.cloud_name}/video/upload`,
-    { method: "POST", body: formData }
+    formData,
+    {},
+    onUploadProgress
   );
-  if (!uploadRes.ok) {
-    const err = await uploadRes.json().catch(() => ({}));
-    throw new Error(err.error?.message || "Cloudinary upload failed.");
-  }
-  const uploaded = await uploadRes.json();
 
-  const startRes = await fetch("/api/jobs/start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const startPayload = await xhrUpload(
+    "/api/jobs/start",
+    JSON.stringify({
       source_public_id: uploaded.public_id,
       original_name: file.name,
     }),
-  });
-  if (!startRes.ok) {
-    const payload = await startRes.json().catch(() => ({}));
-    throw new Error(payload.detail || "Could not start processing job.");
-  }
-  const payload = await startRes.json();
-  return payload.job_id;
+    { "Content-Type": "application/json" }
+  );
+  return startPayload.job_id;
 }
 
-async function uploadVideo(file) {
+async function uploadVideo(file, onUploadProgress) {
   if (appConfig.cloudinary) {
-    return uploadViaCloudinary(file);
+    return uploadViaCloudinary(file, onUploadProgress);
   }
 
   const formData = new FormData();
   formData.append("file", file);
-
-  const res = await fetch("/api/upload", { method: "POST", body: formData });
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    throw new Error(payload.detail || "Upload failed.");
-  }
-  const payload = await res.json();
+  const payload = await xhrUpload("/api/upload", formData, {}, onUploadProgress);
   return payload.job_id;
+}
+
+function handleJobPollFailure(message) {
+  clearInterval(pollTimer);
+  pollTimer = null;
+  setProcessingProgress(0, "Processing interrupted.");
+  logLine.textContent = `Log: Error - ${message}`;
+  alert(message);
+  uploadCard.classList.remove("hidden");
+  progressCard.classList.add("hidden");
 }
 
 function requestJobCleanup() {
@@ -555,14 +612,53 @@ function startPolling() {
   if (pollTimer) {
     clearInterval(pollTimer);
   }
+  pollFailCount = 0;
+  setProcessingEnabled(true);
+  setProcessingProgress(0, "Starting scene detection...");
 
   pollTimer = setInterval(async () => {
     if (!currentJobId) return;
-    const res = await fetch(`/api/jobs/${currentJobId}`);
-    if (!res.ok) return;
+
+    let res;
+    try {
+      res = await fetch(`/api/jobs/${currentJobId}`);
+    } catch {
+      pollFailCount += 1;
+      if (pollFailCount >= MAX_POLL_FAILS) {
+        handleJobPollFailure("Lost connection to server. Please upload again.");
+      }
+      return;
+    }
+
+    if (res.status === 404) {
+      handleJobPollFailure("Job not found. The server may have restarted — please upload your video again.");
+      return;
+    }
+
+    if (res.status === 502 || res.status === 503) {
+      pollFailCount += 1;
+      const retryPct = clampPercent(
+        parseFloat(String(processingProgressPercent.textContent).replace("%", "")) || 0
+      );
+      setProcessingProgress(retryPct, "Server waking up, retrying...");
+      if (pollFailCount >= MAX_POLL_FAILS) {
+        handleJobPollFailure("Server unavailable (502/503). Please try again in a minute.");
+      }
+      return;
+    }
+
+    if (!res.ok) {
+      pollFailCount += 1;
+      if (pollFailCount >= MAX_POLL_FAILS) {
+        handleJobPollFailure(`Status check failed (${res.status}). Please upload again.`);
+      }
+      return;
+    }
+
+    pollFailCount = 0;
     const job = await res.json();
 
-    setProgress(job.progress || 0, job.stage || "Processing...");
+    setProcessingProgress(job.progress || 0, job.stage || "Processing...");
     updateLogLine(job);
     renderScenes(job);
     resultsCard.classList.remove("hidden");
@@ -572,11 +668,14 @@ function startPolling() {
       clearInterval(pollTimer);
       pollTimer = null;
       alert(`Processing failed: ${job.error || "Unknown error"}`);
+      uploadCard.classList.remove("hidden");
+      progressCard.classList.add("hidden");
       return;
     }
 
     if (job.status === "done") {
       currentJobCompleted = true;
+      setProcessingProgress(100, "Completed");
       clearInterval(pollTimer);
       pollTimer = null;
     }
@@ -603,15 +702,20 @@ async function handleFile(file) {
   syntheticLogIndex = 0;
   nextSyntheticLogAt = Date.now() + nextSyntheticDelayMs();
   currentJobCompleted = false;
-  setProgress(2, appConfig.cloudinary ? "Uploading video to Cloudinary..." : "Uploading video...");
+  pollFailCount = 0;
+  resetProgressUi();
+  setUploadProgress(0, appConfig.cloudinary ? "Uploading to Cloudinary..." : "Uploading to server...");
   logLine.textContent = appConfig.cloudinary
     ? "Log: Uploading to Cloudinary, then processing on server."
-    : "Log: Uploading video.";
+    : "Log: Uploading video to server.";
 
   try {
-    currentJobId = await uploadVideo(file);
-    setProgress(4, "Video uploaded. Starting scene detection...");
-    logLine.textContent = "Log: Video uploaded. Starting analysis.";
+    currentJobId = await uploadVideo(file, (pct) => {
+      setUploadProgress(pct, `Uploading... ${pct}%`);
+    });
+    setUploadProgress(100, "Upload complete.");
+    setProcessingProgress(0, "Starting scene detection...");
+    logLine.textContent = "Log: Upload finished. Processing started.";
     startPolling();
   } catch (err) {
     alert(err.message || "Upload failed.");
@@ -726,7 +830,6 @@ loadAppConfig();
 restoreViewOnLoad();
 enableLandingWheelPaging();
 initializeFaqAccordion();
-initializeHowItWorksStepper();
 initializeLandingToHero();
 
 window.addEventListener("load", () => {

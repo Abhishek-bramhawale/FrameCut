@@ -374,7 +374,8 @@ def _detect_and_split(job_id: str) -> None:
         _set_job(job_id, expected_scenes=total)
         _append_log(job_id, f"Detected {total} scenes.")
         cpu_count = os.cpu_count() or 4
-        max_workers = max(1, min(6, cpu_count // 2))
+        # Keep worker count modest for small containers (e.g. Render free tier).
+        max_workers = max(1, min(3, cpu_count // 2))
         _set_job(
             job_id,
             stage=f"Exporting clips in parallel ({max_workers} workers)",

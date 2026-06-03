@@ -897,8 +897,59 @@ html:not(.dark) #log-line {
   color: #111827;
 }
 
-html:not(.dark) #progress-stage {
+.progress-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.progress-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a1a1aa;
+}
+
+.progress-track {
+  height: 8px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #27272a;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #d6b678, #b28f52);
+  transition: width 180ms ease;
+}
+
+.progress-fill-upload {
+  background: linear-gradient(90deg, #93c5fd, #3b82f6);
+}
+
+.progress-stage-text {
+  margin-top: 0.55rem;
+  font-size: 0.875rem;
+  color: #d4d4d8;
+}
+
+#processing-progress-block.is-disabled .progress-track {
+  opacity: 0.35;
+}
+
+html:not(.dark) .progress-label,
+html:not(.dark) .progress-stage-text {
   color: #3f3f46;
+}
+
+html:not(.dark) #upload-progress-percent,
+html:not(.dark) #processing-progress-percent {
+  color: #111827 !important;
 }
 
 /* Make "gray" helper text readable in light theme */

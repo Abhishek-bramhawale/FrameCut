@@ -308,15 +308,31 @@
         </section>
 
         <section id="progress-card" class="panel hidden">
-          <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold">Processing</h3>
-            <span id="progress-percent" class="text-sm text-zinc-300">0%</span>
+          <h3 class="text-lg font-semibold">Progress</h3>
+
+          <div class="progress-block" id="upload-progress-block">
+            <div class="progress-block-head">
+              <span class="progress-label">Upload</span>
+              <span id="upload-progress-percent" class="text-sm text-zinc-300">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="upload-progress-bar" class="progress-fill progress-fill-upload"></div>
+            </div>
+            <p id="upload-progress-stage" class="progress-stage-text">Waiting for file...</p>
           </div>
-          <div class="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-800">
-            <div id="progress-bar" class="h-full w-0 rounded-full bg-amber-500 transition-all"></div>
+
+          <div class="progress-block mt-4" id="processing-progress-block">
+            <div class="progress-block-head">
+              <span class="progress-label">Processing</span>
+              <span id="processing-progress-percent" class="text-sm text-zinc-300">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="processing-progress-bar" class="progress-fill"></div>
+            </div>
+            <p id="processing-progress-stage" class="progress-stage-text">Waiting for upload to finish...</p>
           </div>
-          <p id="progress-stage" class="mt-3 text-sm text-zinc-300">Waiting...</p>
-          <p id="log-line" class="mt-2 rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-300">Log: Waiting for upload.</p>
+
+          <p id="log-line" class="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-300">Log: Waiting for upload.</p>
         </section>
 
         <section id="results-card" class="panel hidden">
