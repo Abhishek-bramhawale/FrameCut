@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://RENDER_BACKEND_URL/api/$1"
+    },
+    {
+      "source": "/styles.css",
+      "destination": "/web/styles.css"
+    },
+    {
+      "source": "/script.js",
+      "destination": "/web/script.js"
+    },
+    {
+      "source": "/Images/(.*)",
+      "destination": "/Images/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/web/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ]
+}
+
