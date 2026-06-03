@@ -34,6 +34,7 @@ const landingToHeroBtn = document.getElementById("landing-to-hero-btn");
 const heroBlock = landingPage?.querySelector(".hero-block");
 
 let currentJobId = null;
+let currentJobCompleted = false;
 let pollTimer = null;
 let lastRenderedSceneCount = 0;
 let lastLogCount = 0;
@@ -41,6 +42,7 @@ let syntheticLogIndex = 0;
 let nextSyntheticLogAt = 0;
 const THEME_KEY = "scene_splitter_theme";
 const VIEW_KEY = "scene_splitter_view";
+let appConfig = { max_upload_mb: 200, cloudinary: null, storage_mode: "local" };
 const SYNTHETIC_PROCESSING_LOGS = [
   "Reading video metadata and validating format.",
   "Building frame analysis plan for boundary detection.",
@@ -392,7 +394,61 @@ function formatDurationHuman(durationSeconds) {
   return `${mins} min ${secs} secs`;
 }
 
+async function loadAppConfig() {
+  try {
+    const res = await fetch("/api/config");
+    if (res.ok) {
+      appConfig = await res.json();
+    }
+  } catch {}
+}
+
+function maxUploadBytes() {
+  return (appConfig.max_upload_mb || 200) * 1024 * 1024;
+}
+
+async function uploadViaCloudinary(file) {
+  const cloudinary = appConfig.cloudinary;
+  if (!cloudinary?.cloud_name || !cloudinary?.upload_preset) {
+    throw new Error("Cloudinary is not configured.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", cloudinary.upload_preset);
+  formData.append("folder", "framecut/incoming");
+
+  const uploadRes = await fetch(
+    `https://api.cloudinary.com/v1_1/${cloudinary.cloud_name}/video/upload`,
+    { method: "POST", body: formData }
+  );
+  if (!uploadRes.ok) {
+    const err = await uploadRes.json().catch(() => ({}));
+    throw new Error(err.error?.message || "Cloudinary upload failed.");
+  }
+  const uploaded = await uploadRes.json();
+
+  const startRes = await fetch("/api/jobs/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source_public_id: uploaded.public_id,
+      original_name: file.name,
+    }),
+  });
+  if (!startRes.ok) {
+    const payload = await startRes.json().catch(() => ({}));
+    throw new Error(payload.detail || "Could not start processing job.");
+  }
+  const payload = await startRes.json();
+  return payload.job_id;
+}
+
 async function uploadVideo(file) {
+  if (appConfig.cloudinary) {
+    return uploadViaCloudinary(file);
+  }
+
   const formData = new FormData();
   formData.append("file", file);
 
@@ -403,6 +459,16 @@ async function uploadVideo(file) {
   }
   const payload = await res.json();
   return payload.job_id;
+}
+
+function requestJobCleanup() {
+  if (!currentJobId || !currentJobCompleted) return;
+  const url = `/api/jobs/${currentJobId}/cleanup`;
+  try {
+    navigator.sendBeacon(url, new Blob([], { type: "application/json" }));
+  } catch {
+    fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+  }
 }
 
 function renderScenes(job) {
@@ -510,6 +576,7 @@ function startPolling() {
     }
 
     if (job.status === "done") {
+      currentJobCompleted = true;
       clearInterval(pollTimer);
       pollTimer = null;
     }
@@ -522,6 +589,11 @@ async function handleFile(file) {
     return;
   }
 
+  if (file.size > maxUploadBytes()) {
+    alert(`Max upload size is ${appConfig.max_upload_mb || 200} MB.`);
+    return;
+  }
+
   uploadCard.classList.add("hidden");
   progressCard.classList.remove("hidden");
   resultsCard.classList.add("hidden");
@@ -530,8 +602,11 @@ async function handleFile(file) {
   lastLogCount = 0;
   syntheticLogIndex = 0;
   nextSyntheticLogAt = Date.now() + nextSyntheticDelayMs();
-  setProgress(2, "Uploading video...");
-  logLine.textContent = "Log: Uploading video.";
+  currentJobCompleted = false;
+  setProgress(2, appConfig.cloudinary ? "Uploading video to Cloudinary..." : "Uploading video...");
+  logLine.textContent = appConfig.cloudinary
+    ? "Log: Uploading to Cloudinary, then processing on server."
+    : "Log: Uploading video.";
 
   try {
     currentJobId = await uploadVideo(file);
@@ -647,6 +722,7 @@ personaChips.forEach((chip) => {
 if (heroGetStartedBtn) heroGetStartedBtn.addEventListener("click", showWorkspace);
 
 initializeTheme();
+loadAppConfig();
 restoreViewOnLoad();
 enableLandingWheelPaging();
 initializeFaqAccordion();
@@ -658,3 +734,6 @@ window.addEventListener("load", () => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }
 });
+
+window.addEventListener("pagehide", requestJobCleanup);
+window.addEventListener("beforeunload", requestJobCleanup);
